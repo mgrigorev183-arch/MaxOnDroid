@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+# bundled third-party tools are added by the installer build, not committed
+tools/*
+!tools/README.md
+# local agent state
+.unlazy/
+.unlazy-hook-state.json
+.claude/settings.local.json
+.impeccable/config.local.json
