@@ -204,7 +204,7 @@ Checkable tool buttons for the risk levels 1–4: surface background and muted t
 A single surface card ("pad") holds the d-pad and the navigation keys on the left and power, sound, channels, settings and input on the right; media keys and the text field sit below it. Keys are rounded 8px tool buttons on the alternate surface with a drawn icon above a word label; arrows are icon-only with accessible names. OK is the one brass key, a pill in the centre of the d-pad. When the pad has keyboard focus its border turns brass ink and the hint under it lists the shortcuts; remote keys never take focus away from the pad.
 
 ### Screen
-Two cards: "Device screen" (brass "Open screen", "Close", Quality/Speed radios, a status line, and an "Advanced" disclosure with a plain form) and "Screenshots and recording" (Screenshot, Start/Stop recording, the capture folder, a 320×200 preview of the last screenshot with Copy and Open file). Status lines hide when empty so the cards keep no blank gaps. A muted note at the end explains why protected video is black. A missing or old scrcpy shows an error banner with "Download scrcpy" and "Set path".
+Two cards: "Device screen" (brass "Open screen", "Close", Quality/Speed radios, a status line, and a "More options" disclosure with a plain form) and "Screenshots and recording" (Screenshot, Start/Stop recording, the capture folder, a 320×200 preview of the last screenshot with Copy and Open file). Status lines hide when empty so the cards keep no blank gaps. A muted note at the end explains why protected video is black. A missing or old scrcpy shows an error banner with "Download scrcpy" and "Set path".
 
 ## Do's and Don'ts
 

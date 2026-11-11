@@ -526,7 +526,7 @@ STRINGS = {
     "screen.preset.speed": "Speed",
     "screen.preset.quality.tip": "Full resolution, 8 Mbit/s. For USB and good Wi-Fi.",
     "screen.preset.speed.tip": "1280 pixels, 4 Mbit/s, 30 frames per second. For slow Wi-Fi.",
-    "screen.advanced": "Advanced",
+    "screen.advanced": "More options",
     "screen.option.size": "Size",
     "screen.option.bit_rate": "Bit rate",
     "screen.option.fps": "Frames per second",
