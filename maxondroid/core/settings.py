@@ -23,6 +23,18 @@ class Settings:
     auto_reconnect: bool = True
     window_geometry: str = ""  # base64 from Qt, opaque here
     window_state: str = ""
+    # Screen tab (scrcpy)
+    scrcpy_path: str = ""  # empty: next to adb, bundled, then PATH
+    screen_preset: str = "quality"
+    screen_max_size: int = 0
+    screen_bit_rate: int = 8
+    screen_max_fps: int = 0
+    screen_audio: bool = True
+    screen_turn_off: bool = False
+    screen_on_top: bool = False
+    screen_stay_awake: bool = False
+    screen_view_only: bool = False
+    capture_dir: str = ""  # empty: Pictures\MaxOnDroid
 
     def normalized(self) -> Settings:
         if self.language not in LANGUAGES:
@@ -30,6 +42,11 @@ class Settings:
         if self.theme not in THEMES:
             self.theme = "system"
         self.adb_path = str(self.adb_path or "")
+        if self.screen_preset not in ("quality", "speed"):
+            self.screen_preset = "quality"
+        self.screen_max_size = min(max(0, self.screen_max_size), 8192)
+        self.screen_bit_rate = min(max(1, self.screen_bit_rate), 100)
+        self.screen_max_fps = min(max(0, self.screen_max_fps), 240)
         return self
 
 

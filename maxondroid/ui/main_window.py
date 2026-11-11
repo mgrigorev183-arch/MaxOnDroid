@@ -36,6 +36,8 @@ from maxondroid.ui.device_list import DeviceListView
 from maxondroid.ui.journal_panel import JournalPanel
 from maxondroid.ui.overview_tab import OverviewTab
 from maxondroid.ui.package_support import PackageCache
+from maxondroid.ui.remote_tab import RemoteTab
+from maxondroid.ui.screen_tab import ScreenTab
 from maxondroid.ui.settings_dialog import SettingsDialog
 
 POLL_MS = 2500
@@ -127,7 +129,9 @@ class MainWindow(QMainWindow):
         self.overview = OverviewTab(ctx)
         self.apps = AppsTab(ctx)
         self.debloat = DebloatTab(ctx)
-        for tab in (self.overview, self.apps, self.debloat):
+        self.remote = RemoteTab(ctx)
+        self.screen = ScreenTab(ctx)
+        for tab in (self.overview, self.apps, self.debloat, self.remote, self.screen):
             self.tabs.addTab(tab, "")
         self.setAcceptDrops(True)
         work_layout.addWidget(self.tabs, 1)
@@ -233,8 +237,12 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(0, tr("tab.overview"))
         self.tabs.setTabText(1, tr("tab.apps"))
         self.tabs.setTabText(2, tr("tab.debloat"))
+        self.tabs.setTabText(3, tr("tab.remote"))
+        self.tabs.setTabText(4, tr("tab.screen"))
         self.apps.retranslate()
         self.debloat.retranslate()
+        self.remote.retranslate()
+        self.screen.retranslate()
         self.connect_button.setText(tr("rail.connect"))
         self.rail_caption.setText(tr("rail.caption"))
         for button, key in ((self.rail_refresh, "menu.refresh"), (self.rail_settings, "menu.settings")):
@@ -260,6 +268,8 @@ class MainWindow(QMainWindow):
         self.overview.apply_palette()
         self.apps.apply_palette()
         self.debloat.apply_palette()
+        self.remote.apply_palette()
+        self.screen.apply_palette()
         self.apps.model.refresh_all()
         self.debloat.refresh_texts()
         if self._connect_dialog is not None:
@@ -306,6 +316,7 @@ class MainWindow(QMainWindow):
             pass
         if self._connect_dialog is not None:
             self._connect_dialog.stop_qr()
+        self.screen.shutdown()
         self.ctx.tasks.shutdown(3000)
         super().closeEvent(event)
 
@@ -328,6 +339,7 @@ class MainWindow(QMainWindow):
             self._adb_path = path
         self._render_adb_banner()
         self._update_status()
+        self.screen.setup_tool()
         self.timer.start()
         self.refresh_now()
         self.device_list.setFocus()
@@ -401,6 +413,8 @@ class MainWindow(QMainWindow):
         self.overview.set_device(view, empty_list=not self.views)
         self.apps.set_device(view)
         self.debloat.set_device(view)
+        self.remote.set_device(view)
+        self.screen.set_device(view)
 
     def _device_menu(self, pos) -> None:
         index = self.device_list.indexAt(pos)
@@ -430,6 +444,7 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         dialog = SettingsDialog(self.ctx, self)
         old_adb = self.ctx.settings.settings.adb_path
+        old_scrcpy = self.ctx.settings.settings.scrcpy_path
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return
         s = dialog.result_settings()
@@ -441,6 +456,8 @@ class MainWindow(QMainWindow):
         self._sync_checks()
         if s.adb_path != old_adb or self.ctx.runner is None:
             self.setup_adb()
+        elif s.scrcpy_path != old_scrcpy:
+            self.screen.setup_tool()
 
     def _set_theme(self, code: str) -> None:
         self.ctx.settings.settings.theme = code

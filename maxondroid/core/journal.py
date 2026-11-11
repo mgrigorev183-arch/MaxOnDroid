@@ -95,6 +95,29 @@ class Journal:
                 pass
         return entry
 
+    def note(self, command: str, serial: str | None = None, output: str = "", ok: bool = True) -> JournalEntry:
+        """Record a command that is not an adb call (starting scrcpy)."""
+        entry = JournalEntry(
+            when=datetime.now(UTC),
+            token=self.token_lookup(serial),
+            serial=serial,
+            command=command.replace("\n", " "),
+            output=_truncate(output),
+            exit_code=0 if ok else 1,
+            timed_out=False,
+            duration_ms=0,
+        )
+        with self._lock:
+            self.entries.append(entry)
+            listeners = list(self._listeners)
+            self._append_file(entry)
+        for listener in listeners:
+            try:
+                listener(entry)
+            except Exception:
+                pass
+        return entry
+
     def clear(self) -> None:
         with self._lock:
             self.entries.clear()

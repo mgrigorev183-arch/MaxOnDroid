@@ -9,7 +9,8 @@ pointing at a JSON file::
         {"args": ["mdns", "services"], "responses": [{"stdout": ""}, {"stdout": "..."}]}
     ]}
 
-``*`` as the last element matches any remaining arguments. ``responses`` are
+``*`` as the last element matches any remaining arguments. ``stdout_b64``
+returns binary output (screenshots). ``responses`` are
 returned one per call (the last one repeats). Every call is appended to
 ``FAKE_ADB_LOG`` as one JSON array per line so tests can check the exact argv.
 Unknown commands exit 1 with "fake adb: no rule".
@@ -48,7 +49,12 @@ def main(argv):
             response = responses[min(count, len(responses) - 1)]
         if response.get("sleep"):
             time.sleep(response["sleep"])
-        sys.stdout.buffer.write(response.get("stdout", "").encode("utf-8"))
+        if "stdout_b64" in response:
+            import base64
+
+            sys.stdout.buffer.write(base64.b64decode(response["stdout_b64"]))
+        else:
+            sys.stdout.buffer.write(response.get("stdout", "").encode("utf-8"))
         sys.stderr.buffer.write(response.get("stderr", "").encode("utf-8"))
         return int(response.get("rc", 0))
     sys.stderr.write("fake adb: no rule for " + " ".join(argv) + "\n")

@@ -153,6 +153,14 @@ class AdbRunner:
         log: bool = True,
         secrets: Sequence[str] = (),
     ) -> AdbResult:
+        result, _ = self._run(args, serial, timeout, log, secrets, binary=False)
+        return result
+
+    def run_bytes(self, args: Sequence[str], serial: str | None = None, timeout: float | None = None, *, log: bool = True) -> tuple[AdbResult, bytes]:
+        """Like run, but returns stdout as raw bytes (``exec-out screencap -p``). The journal sees only its size."""
+        return self._run(args, serial, timeout, log, (), binary=True)
+
+    def _run(self, args, serial, timeout, log, secrets, binary: bool) -> tuple[AdbResult, bytes]:
         argv = (["-s", serial] if serial else []) + _check_args(args)
         if serial is not None:
             _check_args([serial])
@@ -183,10 +191,11 @@ class AdbRunner:
             proc.kill()
             out_b, err_b = proc.communicate()
         duration = time.monotonic() - started
+        data = out_b or b""
         result = AdbResult(
             argv=tuple(argv),
             returncode=proc.returncode if not timed_out else -1,
-            stdout=_decode(out_b),
+            stdout=f"<{len(data)} bytes>" if binary else _decode(out_b),
             stderr=_decode(err_b),
             duration=duration,
             timed_out=timed_out,
@@ -201,7 +210,7 @@ class AdbRunner:
                     listener(result)
                 except Exception:  # a broken listener must never break adb calls
                     pass
-        return result
+        return result, data
 
     def shell(self, serial: str, *argv: str, timeout: float | None = None, log: bool = True) -> AdbResult:
         """Run one command on the device; every argument is quoted for the device shell."""

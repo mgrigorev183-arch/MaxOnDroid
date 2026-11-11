@@ -294,6 +294,17 @@ QCheckBox::indicator, QTableView::indicator {{ width: 14px; height: 14px; border
 QCheckBox::indicator:checked, QTableView::indicator:checked {{ background: {p.brass}; border: 1px solid {p.brass_pressed}; }}
 QCheckBox::indicator:focus {{ border-color: {p.brass_text}; }}
 QProgressBar {{ background: {p.surface_alt}; border: none; border-radius: 3px; height: 6px; text-align: center; }}
+
+#RemotePad {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; }}
+#RemotePad:focus {{ border: 2px solid {p.brass_text}; }}
+QToolButton[remote="true"] {{ background: {p.surface_alt}; color: {p.text}; border: 1px solid {p.border}; border-radius: 8px; padding: 4px 6px; }}
+QToolButton[remote="true"]:hover {{ background: {p.selection}; color: {p.selection_text}; }}
+QToolButton[remote="true"]:pressed {{ background: {p.border}; }}
+QToolButton#RemoteOk {{ background: {p.brass}; color: {p.brass_on}; border: 1px solid {p.brass_pressed}; font-weight: 600; border-radius: 28px; }}
+QToolButton#RemoteOk:hover {{ background: {p.brass_hover}; color: {p.brass_on}; }}
+QToolButton#RemoteOk:pressed {{ background: {p.brass_pressed}; }}
+QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {p.text_muted}; border-radius: 8px; background: {p.surface}; }}
+QRadioButton::indicator:checked {{ background: {p.brass}; border: 1px solid {p.brass_pressed}; }}
 QProgressBar::chunk {{ background: {p.brass}; border-radius: 3px; }}
 """
 

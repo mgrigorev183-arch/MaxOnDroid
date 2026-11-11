@@ -71,6 +71,13 @@ def dynamic_keys() -> set[str]:
     keys |= {f"ops.error.{c}" for c in re.findall(r'code="(\w+)"', ops_src)}
     keys |= {f"ops.error.{c}" for c in re.findall(r'None if result.ok else "(\w+)"', ops_src)}
     assert apk_module and presets
+    # stage 3
+    from maxondroid.core import remote
+
+    keys |= {f"remote.key.{k}" for k in remote.KEYS}
+    screen_src = (SOURCE / "core" / "screen.py").read_text(encoding="utf-8")
+    for code in re.findall(r'ScrcpyError\("(\w+)"', screen_src):
+        keys |= {f"screen.tool.{code}.title", f"screen.tool.{code}.body"}
     return keys
 
 

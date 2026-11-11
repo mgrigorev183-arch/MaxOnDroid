@@ -67,6 +67,15 @@ class SettingsDialog(QDialog):
         self.adb_status = label("", role="muted", wrap=True, selectable=True)
         form.addRow(label(""), self.adb_status)
 
+        scrcpy_row = QHBoxLayout()
+        self.scrcpy_path = QLineEdit(s.scrcpy_path)
+        self.scrcpy_path.setPlaceholderText(tr("settings.scrcpy.auto"))
+        browse_scrcpy = QPushButton(tr("settings.adb.browse"))
+        browse_scrcpy.clicked.connect(self._browse_scrcpy)
+        scrcpy_row.addWidget(self.scrcpy_path, 1)
+        scrcpy_row.addWidget(browse_scrcpy)
+        form.addRow(label(tr("settings.scrcpy")), scrcpy_row)
+
         self.auto_reconnect = QCheckBox(tr("settings.auto_reconnect"))
         self.auto_reconnect.setChecked(s.auto_reconnect)
         self.journal_visible = QCheckBox(tr("settings.journal_visible"))
@@ -103,6 +112,12 @@ class SettingsDialog(QDialog):
         if path:
             self.adb_path.setText(path)
 
+    def _browse_scrcpy(self) -> None:
+        pattern = "scrcpy.exe (scrcpy.exe)" if sys.platform == "win32" else "scrcpy (scrcpy)"
+        path, _ = QFileDialog.getOpenFileName(self, tr("settings.scrcpy.pick"), self.scrcpy_path.text(), pattern)
+        if path:
+            self.scrcpy_path.setText(path)
+
     def _update_adb_status(self) -> None:
         custom = self.adb_path.text().strip()
         found = find_adb(custom or None)
@@ -120,6 +135,7 @@ class SettingsDialog(QDialog):
         s.language = self.language.currentData()
         s.theme = self.theme.currentData()
         s.adb_path = self.adb_path.text().strip()
+        s.scrcpy_path = self.scrcpy_path.text().strip()
         s.auto_reconnect = self.auto_reconnect.isChecked()
         s.journal_visible = self.journal_visible.isChecked()
         return s

@@ -50,7 +50,7 @@ def resolve(setting: str, system_languages: list[str]) -> str:
     return "en"
 
 
-def tr(key: str, **values: object) -> str:
+def tr(key: str, /, **values: object) -> str:
     text = LANGUAGES[_current].get(key) or LANGUAGES["en"].get(key) or key
     if values:
         try:

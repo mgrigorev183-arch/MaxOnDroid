@@ -4,7 +4,7 @@
 
 *English summary below.*
 
-> **Состояние:** этап 2 из 5. Готовы окно, список устройств, подключение (USB, адрес, сопряжение по коду и QR, поиск в сети), вкладки «Обзор», «Приложения» и «Чистка», журнал команд, русский и английский языки, светлая и тёмная темы. Установщика пока нет: приложение запускается из исходников (инструкция ниже).
+> **Состояние:** этап 3 из 5. Готовы окно, список устройств, подключение (USB, адрес, сопряжение по коду и QR, поиск в сети), вкладки «Обзор», «Приложения», «Чистка», «Пульт» и «Экран», журнал команд, русский и английский языки, светлая и тёмная темы. Установщика пока нет: приложение запускается из исходников (инструкция ниже).
 
 ## Что умеет сейчас
 
@@ -21,12 +21,15 @@
 - **Журнал команд** с номерком устройства у каждой строки. Пишется и в файл. Коды сопряжения в журнал не попадают.
 - **Приложения:** все пакеты устройства с поиском и фильтрами по издателю, типу и состоянию. Установка APK и наборов `.apks`, `.xapk`, `.apkm` кнопкой или перетаскиванием в окно (из набора выбираются части под процессор и экран устройства). Запуск, остановка, отключение и включение, удаление и возврат, очистка данных, сохранение APK на компьютер (приложение из нескольких частей сохраняется одним файлом `.apks`).
 - **Чистка:** пакеты устройства, сгруппированные по издателю: Android, производитель устройства, Google, Яндекс и другие; издатели с одним приложением собраны в «Остальные». У каждого пакета риск удаления от 1 («без последствий для системы», само приложение пропадёт) до 4 («устройство может не загрузиться») и описание из базы [UAD-ng](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation). Отмеченные пакеты удаляются для пользователя или отключаются. Пресеты в JSON, чтобы применить тот же набор к другому устройству или отдать другу. «История изменений» отменяет любое изменение или все сразу.
+- **Пульт:** крестовина и «ОК», «Назад», «Домой», «Меню», громкость, питание, каналы, перемотка и пауза. Удержание кнопки — долгое нажатие. Пока пульт в фокусе, работает клавиатура компьютера (стрелки, Enter, Esc, пробел, +/−, PgUp/PgDn). Поле для отправки текста в поле ввода на устройстве (латиница, цифры, символы).
+- **Экран:** изображение устройства в отдельном окне через [scrcpy](https://github.com/Genymobile/scrcpy) с пресетами «Качество» и «Скорость» и дополнительными параметрами (размер, битрейт, частота кадров, звук, выключить экран устройства, поверх всех окон, только просмотр). Запись экрана в `.mkv`, скриншоты в `Изображения\MaxOnDroid` с предпросмотром и копированием в буфер. Можно открыть экраны нескольких устройств одновременно. Защищённое видео (онлайн-кинотеатры) показывается чёрным: так работает защита от копирования.
 - **Защита от поломок:** системные приложения удаляются только для пользователя (`pm uninstall -k --user 0`) и возвращаются одной кнопкой. Установленные вами приложения перед удалением сохраняются на компьютер. Для важных пакетов (главный экран, клавиатура, сервисы Google, обновления) отдельное красное подтверждение. Пакеты, без которых перестанет работать сам adb, MaxOnDroid не трогает.
 
 ## Запуск из исходников (Windows 10)
 
 1. Установите [Python 3.11 или новее](https://www.python.org/downloads/windows/). В установщике отметьте «Add python.exe to PATH».
 2. Установите [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (в архиве лежит `adb.exe`) и либо добавьте папку в `PATH`, либо после запуска укажите путь к `adb.exe` в настройках приложения. Если `adb` у вас уже работает из `cmd`, ничего делать не нужно.
+   Для вкладки «Экран» скачайте архив `scrcpy-win64-…zip` со страницы [релизов scrcpy](https://github.com/Genymobile/scrcpy/releases) и распакуйте. Удобнее всего указать в настройках MaxOnDroid `adb.exe` из этой папки: тогда приложение само найдёт `scrcpy.exe` рядом.
 3. В папке проекта выполните:
 
    ```bat
@@ -70,8 +73,8 @@ ruff check .
 ## План
 
 1. Каркас, подключение, «Обзор».
-2. «Приложения» и «Чистка» (база пакетов UAD-ng, пресеты, откат). **← сейчас**
-3. «Пульт» и «Экран» (scrcpy).
+2. «Приложения» и «Чистка» (база пакетов UAD-ng, пресеты, откат).
+3. «Пульт» и «Экран» (scrcpy). **← сейчас**
 4. «Файлы» и «Консоль».
 5. Установщик, сборка в GitHub Actions, проверка безопасности, первый релиз.
 
@@ -85,6 +88,6 @@ GPL-3.0-only, см. [LICENSE](LICENSE). В приложение встроен �
 
 MaxOnDroid is a Windows desktop app for managing the Android devices on your home network (Android TV and phones) through `adb`. Every action is logged as the plain `adb` command it runs.
 
-Stage 2 of 5 is done: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the Apps tab (install APKs and split bundles, per-app actions, save APKs), the Debloat tab (UAD-ng package list with removal levels, presets, undo history), the command journal, Russian and English, light and dark themes. Run it from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
+Stage 3 of 5 is done: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the Apps tab (install APKs and split bundles, per-app actions, save APKs), the Debloat tab (packages grouped by publisher with removal risk 1-4, presets, undo history), the Remote tab (on-screen TV remote and PC keyboard shortcuts), the Screen tab (scrcpy mirroring with presets, recording, screenshots), the command journal, Russian and English, light and dark themes. Run it from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
 
 Licensed under GPL-3.0-only.
