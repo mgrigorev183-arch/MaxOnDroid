@@ -189,7 +189,13 @@ Small, quiet radii: 4px controls, 6px cards and banners, 5px device rows. The to
 A disc that carries the connection state by shape, not only by colour: solid brass for connected, an outline ring for offline, a solid muted disc with a notch for "waiting for permission", a dashed ring while connecting, and an extra amber ring when legacy network adb is open. It appears at 34px in the rail, 52px in the Overview header, and as the two-digit number in the journal's first column.
 
 ### Banners
-Full-width strips with a drawn warning icon, a bold title, a body and at most one action button. Amber for security, neutral for state guidance, danger outline for errors.
+Full-width strips with a drawn warning icon, a bold title, a body and up to two actions. One action sits to the right of the text; two actions go in a row under the body so the text keeps its width. Amber for security, neutral for state guidance, danger outline for errors. An accepted risk collapses the amber banner to its title line with a "Details" action; the amber ring on the token stays.
+
+### Package tables (Apps, Debloat)
+Plain `QTableView`s on the surface colour with alternating rows, no grid, 26px rows, package names in the code face. Disabled and removed packages use the muted text colour and say their state in words. The Debloat table leads with a checkbox column (14px square indicator: empty outline, or filled brass when ticked) and pairs with a details pane on the right that shows the UAD-ng description, removal level in words, and a danger-coloured line for important packages.
+
+### Filter toggles
+Checkable tool buttons for the UAD-ng removal levels: surface background and muted text when off, selection colour with a brass-ink border when on. The state is carried by fill and border, and every level keeps its word label.
 
 ## Do's and Don'ts
 

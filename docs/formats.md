@@ -71,3 +71,54 @@ Location: `%LOCALAPPDATA%\MaxOnDroid\logs\`. One JSON object per line, one file 
 ```
 
 `token` is `null` for commands not tied to a saved device. Pairing codes are replaced with `•` before anything is written. `output` is cut at 8000 characters.
+
+## changes.json — undo journal
+
+Location: `%APPDATA%\MaxOnDroid\changes.json`. Every package change MaxOnDroid makes that takes something away is appended here, so it can be undone from Debloat → Change history.
+
+```json
+{
+  "format": "maxondroid.changes",
+  "version": 1,
+  "changes": [
+    {"id": "3f2a9c1b7e10", "device": "28041SKV0123", "package": "com.google.android.youtube.tv",
+     "action": "remove_for_user", "time": "2026-11-11T08:40:00+00:00", "version": "4.01.345",
+     "backup": null, "undone": null}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `device` | Registry key of the device (see `devices.json`). |
+| `action` | `remove_for_user` (system app, `pm uninstall -k --user 0`; undone with `cmd package install-existing`), `uninstall` (app the user installed; undone by reinstalling `backup`), or `disable` (`pm disable-user --user 0`; undone with `pm enable`). |
+| `backup` | Path of the `.apk` or `.apks` saved before a full uninstall, or `null`. |
+| `undone` | Time the change was undone, or `null` while it is in effect. |
+
+Entries with an invalid package name or an action outside the three above are dropped when the file is read.
+
+APK backups live in `%LOCALAPPDATA%\MaxOnDroid\data\backups\<device>\`.
+
+## Debloat presets (*.json)
+
+Default folder: `%APPDATA%\MaxOnDroid\presets\`. A preset can be saved anywhere and shared.
+
+```json
+{
+  "format": "maxondroid.preset",
+  "version": 1,
+  "name": "Телевизор: реклама",
+  "description": "",
+  "created": "2026-11-11T08:40:00+00:00",
+  "packages": [
+    {"package": "com.google.android.tvrecommendations", "action": "remove"},
+    {"package": "com.google.android.youtube.tv", "action": "disable"}
+  ]
+}
+```
+
+`action` is `remove` or `disable`. When a preset is applied, each package is reported as "to change", "already done" or "not on this device" before anything happens, and the usual confirmations for important packages still apply. Files over 2 MB, entries with invalid package names and duplicates are ignored; at most 2000 packages are read.
+
+## UAD-ng package database
+
+The bundled snapshot is `maxondroid/data/uad/uad_lists.json` (provenance in `SOURCE.json`, licence note in `NOTICE.md`). "Update database" stores a downloaded copy as `%LOCALAPPDATA%\MaxOnDroid\data\uad_lists.json` with `uad_lists.meta.json` holding its SHA-256; the copy is used only while its checksum matches and it parses with at least 500 entries.

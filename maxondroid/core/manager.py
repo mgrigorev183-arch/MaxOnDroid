@@ -39,6 +39,7 @@ class DeviceView:
     alias: str = ""
     network: NetworkAddress | None = None
     state_detail: str = ""
+    risk_accepted: bool = False
 
     @property
     def online(self) -> bool:
@@ -192,6 +193,7 @@ class DeviceManager:
                     alias=alias,
                     network=saved.network if saved else None,
                     state_detail=device.state_detail,
+                    risk_accepted=bool(saved and saved.legacy_risk_accepted),
                 )
             )
 
@@ -215,6 +217,7 @@ class DeviceManager:
                     saved=True,
                     alias=saved.alias,
                     network=saved.network,
+                    risk_accepted=saved.legacy_risk_accepted,
                 )
             )
         views.sort(key=lambda v: (v.token is None, v.token or 0, v.name.lower()))

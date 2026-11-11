@@ -21,6 +21,15 @@ def repolish(widget: QWidget) -> None:
     widget.update()
 
 
+def refilter(proxy) -> None:
+    """Re-run a proxy model's filter (Qt 6.9 renamed the API)."""
+    if hasattr(proxy, "beginFilterChange"):
+        proxy.beginFilterChange()
+        proxy.endFilterChange()
+    else:
+        proxy.invalidateFilter()
+
+
 def label(text: str = "", role: str | None = None, wrap: bool = False, selectable: bool = False) -> QLabel:
     lbl = QLabel(text)
     if role:
@@ -73,9 +82,20 @@ class Banner(QFrame):
         layout.addLayout(text_box, 1)
         self.button = QPushButton()
         self.button.hide()
-        layout.addWidget(self.button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.button2 = QPushButton()
+        self.button2.hide()
+        # one action sits to the right of the text; two actions go in a row under it
+        self._side = QVBoxLayout()
+        layout.addLayout(self._side)
+        self._below = QHBoxLayout()
+        self._below.setContentsMargins(0, 6, 0, 0)
+        self._below.setSpacing(8)
+        self._below.addStretch(1)
+        text_box.addLayout(self._below)
         self._handler: Callable[[], None] | None = None
+        self._handler2: Callable[[], None] | None = None
         self.button.clicked.connect(self._clicked)
+        self.button2.clicked.connect(lambda: self._handler2 and self._handler2())
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.hide()
 
@@ -91,6 +111,8 @@ class Banner(QFrame):
         action: str | None = None,
         handler: Callable[[], None] | None = None,
         palette: theme.Palette | None = None,
+        action2: str | None = None,
+        handler2: Callable[[], None] | None = None,
     ) -> None:
         self.setProperty("kind", kind)
         repolish(self)
@@ -109,7 +131,49 @@ class Banner(QFrame):
             self.button.show()
         else:
             self.button.hide()
+        self._handler2 = handler2
+        two = bool(action2 and handler2)
+        if two:
+            self.button2.setText(action2)
+            self.button2.show()
+        else:
+            self.button2.hide()
+        for button in (self.button, self.button2):
+            self._side.removeWidget(button)
+            self._below.removeWidget(button)
+        if two:
+            self._below.insertWidget(0, self.button)
+            self._below.insertWidget(1, self.button2)
+        else:
+            self._side.addWidget(self.button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.show()
+
+
+class Placeholder(QWidget):
+    """Centered message with an optional retry button, for tabs that have nothing to show yet."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.addStretch(1)
+        self.text = label("", role="muted", wrap=True, selectable=True)
+        self.text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.text)
+        self.button = QPushButton()
+        self.button.hide()
+        layout.addSpacing(10)
+        layout.addWidget(self.button, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(2)
+        self._handler: Callable[[], None] | None = None
+        self.button.clicked.connect(lambda: self._handler and self._handler())
+
+    def set_message(self, text: str, action: str | None = None, handler: Callable[[], None] | None = None) -> None:
+        self.text.setText(text)
+        self._handler = handler
+        self.button.setVisible(bool(action and handler))
+        if action:
+            self.button.setText(action)
 
 
 def kind_name(kind: Kind) -> str:

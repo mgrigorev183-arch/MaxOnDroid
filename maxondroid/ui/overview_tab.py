@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -109,6 +110,7 @@ class OverviewTab(QWidget):
         self._error: str | None = None
         self._action_note: tuple[str, str] | None = None  # (kind, text) after an action
         self._busy_actions = False
+        self._risk_expanded = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -245,6 +247,7 @@ class OverviewTab(QWidget):
         if previous is None or previous.key != view.key:
             self._action_note = None
             self._error = None
+            self._risk_expanded = False
             if self._info_for and self._info_for[0] != view.key:
                 self.info = None
         wanted = (view.key, view.serial) if view.online else None
@@ -339,15 +342,24 @@ class OverviewTab(QWidget):
     def _render_banners(self, view: DeviceView, p: theme.Palette) -> None:
         if view.legacy_network_open and view.online:
             port = self.info.identity.legacy_tcp_port if self.info and self._info_for and self._info_for[0] == view.key else None
-            self.security_banner.show_message(
-                "warning",
-                tr("overview.legacy.title"),
-                tr("overview.legacy.body", port=port or connection.LEGACY_PORT)
-                + (" " + tr("overview.legacy.body_wifi") if view.transport is Transport.WIFI_LEGACY else ""),
-                tr("overview.legacy.action"),
-                self.disable_network_adb,
-                p,
-            )
+            port = port or connection.LEGACY_PORT
+            if view.risk_accepted and not self._risk_expanded:
+                self.security_banner.show_message(
+                    "warning", tr("overview.legacy.accepted", port=port), "", tr("overview.legacy.details"), self._expand_risk, p
+                )
+            else:
+                body = tr("overview.legacy.body", port=port)
+                if view.transport is Transport.WIFI_LEGACY:
+                    body += " " + tr("overview.legacy.body_wifi")
+                if view.risk_accepted:
+                    second, handler2 = tr("overview.legacy.revoke"), lambda: self._set_risk(False)
+                elif view.saved:
+                    second, handler2 = tr("overview.legacy.accept"), lambda: self._set_risk(True)
+                else:
+                    second, handler2 = None, None
+                self.security_banner.show_message(
+                    "warning", tr("overview.legacy.title"), body, tr("overview.legacy.action"), self.disable_network_adb, p, second, handler2
+                )
         else:
             self.security_banner.hide()
 
@@ -527,6 +539,20 @@ class OverviewTab(QWidget):
             return
         runner, serial = self.ctx.runner, view.serial
         self._run_action(lambda: actions.reboot(runner, serial, target), tr("overview.reboot.sent", name=view.name))
+
+    def _expand_risk(self) -> None:
+        self._risk_expanded = True
+        self.render()
+
+    def _set_risk(self, accepted: bool) -> None:
+        view = self.view
+        if view is None or not view.saved:
+            return
+        self.ctx.registry.set_risk_accepted(view.key, accepted)
+        self._risk_expanded = False
+        self.view = replace(view, risk_accepted=accepted)
+        self.render()
+        self.ctx.request_refresh()
 
     def rename(self) -> None:
         view = self.view

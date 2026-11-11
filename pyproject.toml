@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "maxondroid"
 version = "0.1.0"
@@ -15,6 +19,12 @@ dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6"]
 
 [project.gui-scripts]
 maxondroid = "maxondroid.ui.app:main"
+
+[tool.setuptools.packages.find]
+include = ["maxondroid*"]
+
+[tool.setuptools.package-data]
+maxondroid = ["data/uad/*.json", "data/uad/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

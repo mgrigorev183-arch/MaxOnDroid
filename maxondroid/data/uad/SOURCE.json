@@ -1,0 +1,9 @@
+{
+  "name": "Universal Android Debloater Next Generation package list",
+  "url": "https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation",
+  "file": "resources/assets/uad_lists.json",
+  "commit": "9fcad87bf78c52c4270504bc8880139d95a27a29",
+  "retrieved": "2026-11-11",
+  "sha256": "69e3e7f33a64f165217a58bb426aada13385f5427a5123e34d31041416f593a6",
+  "license": "GPL-3.0"
+}

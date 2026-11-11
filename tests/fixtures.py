@@ -134,3 +134,69 @@ PAIR_BAD = "Failed: Wrong password or connection was dropped.\n"
 CONNECT_OK = "connected to 192.168.1.23:37159\n"
 CONNECT_ALREADY = "already connected to 192.168.1.40:5555\n"
 CONNECT_REFUSED = "cannot connect to 192.168.1.99:5555: No connection could be made because the target machine actively refused it. (10061)\n"
+
+
+# --- stage 2: packages ---------------------------------------------------------
+
+PACKAGES_OUTPUT = """@@all
+package:com.android.systemui
+package:com.google.android.youtube.tv
+package:com.google.android.tvrecommendations
+package:com.google.android.apps.tv.launcherx
+package:com.netflix.ninja
+package:org.videolan.vlc
+package:com.android.shell
+package:com.google.android.inputmethod.latin
+package:com.xiaomi.mitv.upgrade
+package:not a package
+@@installed
+package:com.android.systemui
+package:com.google.android.youtube.tv
+package:com.google.android.apps.tv.launcherx
+package:com.netflix.ninja
+package:org.videolan.vlc
+package:com.android.shell
+package:com.google.android.inputmethod.latin
+package:com.xiaomi.mitv.upgrade
+@@system
+package:com.android.systemui
+package:com.google.android.youtube.tv
+package:com.google.android.tvrecommendations
+package:com.google.android.apps.tv.launcherx
+package:com.netflix.ninja
+package:com.android.shell
+package:com.google.android.inputmethod.latin
+package:com.xiaomi.mitv.upgrade
+@@disabled
+package:com.netflix.ninja
+@@versions
+  Package [com.android.systemui] (a1b2c3):
+    versionCode=31 minSdk=31 targetSdk=31
+    versionName=12
+  Package [com.google.android.youtube.tv] (d4e5f6):
+    versionCode=4012345 minSdk=21 targetSdk=33
+    versionName=4.01.345
+  Package [org.videolan.vlc] (778899):
+    versionCode=13050407 minSdk=17 targetSdk=33
+    versionName=3.5.4
+@@home
+priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true
+com.google.android.apps.tv.launcherx/.home.HomeActivity
+@@ime
+com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+@@abi
+arm64-v8a,armeabi-v7a,armeabi
+arm64-v8a
+@@sdk
+31
+@@density
+Physical density: 320
+@@leanback
+true
+@@end
+"""
+
+PM_PATH_SPLIT = """package:/data/app/~~abc==/org.videolan.vlc-xyz==/base.apk
+package:/data/app/~~abc==/org.videolan.vlc-xyz==/split_config.arm64_v8a.apk
+package:/data/app/~~abc==/org.videolan.vlc-xyz==/split_config.xhdpi.apk
+"""

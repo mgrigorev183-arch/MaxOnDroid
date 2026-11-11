@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import sys
 
+import shiboken6
 from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from maxondroid import APP_ID, APP_NAME, __version__, i18n
-from maxondroid.core import paths
+from maxondroid.core import paths, uad
+from maxondroid.core.changes import ChangeJournal
 from maxondroid.core.journal import Journal
 from maxondroid.core.registry import Registry
 from maxondroid.core.settings import SettingsStore
@@ -39,6 +41,11 @@ def create_window(app: QApplication) -> MainWindow:
     registry = Registry(paths.config_dir() / "devices.json")
     journal = Journal(paths.log_dir())
     ctx = AppContext(settings=settings, registry=registry, journal=journal, tasks=TaskRunner(app))
+    ctx.changes = ChangeJournal(paths.config_dir() / "changes.json")
+    try:
+        ctx.uad = uad.load(paths.package_data_dir() / "uad", paths.data_dir())
+    except (OSError, uad.DatabaseError):
+        ctx.uad = None  # the Debloat tab says the database is missing
 
     def apply_language(setting: str) -> None:
         i18n.set_language(i18n.resolve(setting, QLocale.system().uiLanguages()))
@@ -53,8 +60,14 @@ def create_window(app: QApplication) -> MainWindow:
     apply_language(settings.settings.language)
     apply_theme(settings.settings.theme)
     window = MainWindow(ctx, apply_theme, apply_language)
-    retranslate = window.retranslate
+    def retranslate() -> None:
+        if shiboken6.isValid(window) and shiboken6.isValid(window.apps):
+            window.retranslate()
+        else:  # the window is gone: stop listening
+            i18n.remove_listener(retranslate)
+
     i18n.on_change(retranslate)
+    window.i18n_listener = retranslate  # removed in closeEvent
     window.destroyed.connect(lambda *_: i18n.remove_listener(retranslate))
 
     hints = QGuiApplication.styleHints()

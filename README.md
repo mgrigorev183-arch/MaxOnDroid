@@ -4,7 +4,7 @@
 
 *English summary below.*
 
-> **Состояние:** этап 1 из 5. Готовы окно, список устройств, подключение (USB, адрес, сопряжение по коду и QR, поиск в сети), вкладка «Обзор», журнал команд, русский и английский языки, светлая и тёмная темы. Установщика пока нет: приложение запускается из исходников (инструкция ниже).
+> **Состояние:** этап 2 из 5. Готовы окно, список устройств, подключение (USB, адрес, сопряжение по коду и QR, поиск в сети), вкладки «Обзор», «Приложения» и «Чистка», журнал команд, русский и английский языки, светлая и тёмная темы. Установщика пока нет: приложение запускается из исходников (инструкция ниже).
 
 ## Что умеет сейчас
 
@@ -19,6 +19,9 @@
 - **Обзор:** модель, версия Android и патч безопасности, батарея, память, экран, IP-адрес, способ подключения. Перезагрузка в систему, recovery или загрузчик (с подтверждением).
 - **Безопасность сети:** если на устройстве открыт старый сетевой adb (подключиться может кто угодно в сети), приложение предупреждает и даёт выключить его одной кнопкой.
 - **Журнал команд** с номерком устройства у каждой строки. Пишется и в файл. Коды сопряжения в журнал не попадают.
+- **Приложения:** все пакеты устройства с поиском и фильтрами. Установка APK и наборов `.apks`, `.xapk`, `.apkm` кнопкой или перетаскиванием в окно (из набора выбираются части под процессор и экран устройства). Запуск, остановка, отключение и включение, удаление и возврат, очистка данных, сохранение APK на компьютер (приложение из нескольких частей сохраняется одним файлом `.apks`).
+- **Чистка:** пакеты из базы [UAD-ng](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation) с описанием и уровнем риска («Рекомендуется», «Для опытных», «Эксперт», «Опасно»). Отмеченные пакеты удаляются для пользователя или отключаются. Пресеты в JSON, чтобы применить тот же набор к другому устройству или отдать другу. «История изменений» отменяет любое изменение или все сразу.
+- **Защита от поломок:** системные приложения удаляются только для пользователя (`pm uninstall -k --user 0`) и возвращаются одной кнопкой. Установленные вами приложения перед удалением сохраняются на компьютер. Для важных пакетов (главный экран, клавиатура, сервисы Google, обновления) отдельное красное подтверждение. Пакеты, без которых перестанет работать сам adb, MaxOnDroid не трогает.
 
 ## Запуск из исходников (Windows 10)
 
@@ -48,7 +51,7 @@ ruff check .
 
 - `adb` всегда запускается со списком аргументов, без командной оболочки Windows: имя устройства или путь не превратятся во вторую команду.
 - Всё, что уходит в `adb shell` из ввода пользователя, экранируется для shell на устройстве.
-- Приложение ничего не отправляет в интернет и не открывает сетевых портов на компьютере. Сеть используется только для подключения к вашим устройствам.
+- Приложение не открывает сетевых портов на компьютере и не отправляет в интернет никаких данных. Единственный запрос в интернет — скачивание свежей базы UAD-ng с GitHub, и только по кнопке «Обновить базу».
 - Ключи `adb` (`%USERPROFILE%\.android\adbkey`) приложение не читает и не копирует.
 - Подсеть не сканируется: устройства находятся только через mDNS, который они сами объявляют.
 
@@ -56,22 +59,23 @@ ruff check .
 
 | Что | Где |
 |---|---|
-| Настройки и список устройств | `%APPDATA%\MaxOnDroid` |
+| Настройки, список устройств, история изменений, пресеты | `%APPDATA%\MaxOnDroid` |
 | Журнал команд (14 дней) | `%LOCALAPPDATA%\MaxOnDroid\logs` |
+| Копии APK перед удалением, скачанная база UAD-ng | `%LOCALAPPDATA%\MaxOnDroid\data` |
 
 Форматы файлов описаны в [docs/formats.md](docs/formats.md).
 
 ## План
 
-1. Каркас, подключение, «Обзор». **← сейчас**
-2. «Приложения» и «Чистка» (база пакетов UAD-ng, пресеты, откат).
+1. Каркас, подключение, «Обзор».
+2. «Приложения» и «Чистка» (база пакетов UAD-ng, пресеты, откат). **← сейчас**
 3. «Пульт» и «Экран» (scrcpy).
 4. «Файлы» и «Консоль».
 5. Установщик, сборка в GitHub Actions, проверка безопасности, первый релиз.
 
 ## Лицензия
 
-GPL-3.0-only, см. [LICENSE](LICENSE).
+GPL-3.0-only, см. [LICENSE](LICENSE). В приложение встроен список пакетов проекта Universal Android Debloater Next Generation (тоже GPL-3.0), подробности в [maxondroid/data/uad/NOTICE.md](maxondroid/data/uad/NOTICE.md).
 
 ---
 
@@ -79,6 +83,6 @@ GPL-3.0-only, см. [LICENSE](LICENSE).
 
 MaxOnDroid is a Windows desktop app for managing the Android devices on your home network (Android TV and phones) through `adb`. Every action is logged as the plain `adb` command it runs.
 
-Stage 1 of 5 is done: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the command journal, Russian and English, light and dark themes. Run it from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
+Stage 2 of 5 is done: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the Apps tab (install APKs and split bundles, per-app actions, save APKs), the Debloat tab (UAD-ng package list with removal levels, presets, undo history), the command journal, Russian and English, light and dark themes. Run it from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
 
 Licensed under GPL-3.0-only.

@@ -1,8 +1,9 @@
 """Where MaxOnDroid keeps its files.
 
 Windows:
-    settings and device registry  %APPDATA%\\MaxOnDroid
-    command logs                  %LOCALAPPDATA%\\MaxOnDroid\\logs
+    settings, device registry, presets, change journal  %APPDATA%\\MaxOnDroid
+    command logs                                        %LOCALAPPDATA%\\MaxOnDroid\\logs
+    APK backups, downloaded package database            %LOCALAPPDATA%\\MaxOnDroid\\data
 Other systems follow the XDG base directories.
 
 Setting the environment variable ``MAXONDROID_HOME`` puts everything under one
@@ -49,6 +50,27 @@ def log_dir() -> Path:
         path = Path(base) / APP_ID / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def data_dir() -> Path:
+    """Large local data: APK backups and the downloaded package database."""
+    override = _home_override()
+    if override:
+        path = override / "data"
+    elif sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        path = Path(base) / APP_NAME / "data"
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+        path = Path(base) / APP_ID
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def package_data_dir() -> Path:
+    """Read-only files shipped inside the package (the bundled UAD-ng list)."""
+    base = Path(getattr(sys, "_MEIPASS", "")) / "maxondroid" if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+    return base / "data"
 
 
 def app_root() -> Path:

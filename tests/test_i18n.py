@@ -40,6 +40,35 @@ def dynamic_keys() -> set[str]:
     validate_src = (SOURCE / "core" / "validate.py").read_text(encoding="utf-8")
     keys |= {f"validate.{c}" for c in re.findall(r'ValidationError\("(\w+)"\)', validate_src)}
     keys |= {f"settings.language.{c}" for c in LANGUAGES} | {f"settings.theme.{c}" for c in THEMES}
+    # stage 2
+    from maxondroid.core import apk as apk_module
+    from maxondroid.core import packages, presets, safety, uad
+    from maxondroid.ui import apps_tab, debloat_tab
+
+    keys |= {f"pkg.state.{s.value}" for s in packages.PkgState}
+    keys |= {f"apps.col.{c}" for c in apps_tab.COLUMNS}
+    keys |= {f"apps.kind.{k}" for k in ("all", "user", "system")}
+    keys |= {f"apps.filter.{k}" for k in ("installed", "enabled", "disabled", "removed", "all")}
+    keys |= {f"debloat.col.{c}" for c in debloat_tab.COLUMNS if c != "check"}
+    keys |= {f"debloat.state.{k}" for k in ("installed", "changed", "all")}
+    keys |= {f"removal.{r.value}" for r in uad.Removal} | {f"removal.desc.{r.value}" for r in uad.Removal}
+    keys |= {f"uadlist.{g}" for g in ("all",) + debloat_tab.GROUPS}
+    keys |= {f"safety.reason.{r.value}" for r in safety.Reason}
+    keys |= {f"pkg.critical.do.{a}" for a in ("remove_for_user", "disable")}
+    keys |= {f"history.action.{a.value}" for a in __import__("maxondroid.core.changes", fromlist=["RECORDED"]).RECORDED}
+    keys |= {f"debloat.db.{s.value}" for s in uad.Source}
+    uad_src = (SOURCE / "core" / "uad.py").read_text(encoding="utf-8")
+    keys |= {f"debloat.db.error.{c}" for c in re.findall(r'DatabaseError\("(\w+)"', uad_src)}
+    preset_src = (SOURCE / "core" / "presets.py").read_text(encoding="utf-8")
+    keys |= {f"debloat.preset.error.{c}" for c in re.findall(r'PresetError\("(\w+)"', preset_src)}
+    apk_src = (SOURCE / "core" / "apk.py").read_text(encoding="utf-8")
+    keys |= {f"install.error.{c}" for c in re.findall(r'BundleError\("(\w+)"', apk_src)}
+    keys |= {f"install.error.{c}" for c in re.findall(r'InstallResult\(False, \w+, "(\w+)"', apk_src)}
+    keys |= {"install.error.TIMEOUT", "install.error.UNKNOWN"}
+    ops_src = (SOURCE / "core" / "ops.py").read_text(encoding="utf-8") + (SOURCE / "ui" / "apps_tab.py").read_text(encoding="utf-8")
+    keys |= {f"ops.error.{c}" for c in re.findall(r'code="(\w+)"', ops_src)}
+    keys |= {f"ops.error.{c}" for c in re.findall(r'None if result.ok else "(\w+)"', ops_src)}
+    assert apk_module and presets
     return keys
 
 

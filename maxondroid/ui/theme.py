@@ -285,7 +285,14 @@ QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 #Rail QScrollBar::handle:vertical {{ background: {p.rail_selected}; }}
 
+QToolButton[filter="true"] {{ background: {p.surface}; color: {p.text_muted}; border: 1px solid {p.border}; border-radius: 4px; padding: 4px 10px; }}
+QToolButton[filter="true"]:hover {{ background: {p.surface_alt}; }}
+QToolButton[filter="true"]:checked {{ background: {p.selection}; color: {p.selection_text}; border-color: {p.brass_text}; }}
+QToolButton[filter="true"]:focus {{ border-color: {p.brass_text}; }}
 QCheckBox, QRadioButton {{ spacing: 8px; background: transparent; }}
+QCheckBox::indicator, QTableView::indicator {{ width: 14px; height: 14px; border: 1px solid {p.text_muted}; border-radius: 3px; background: {p.surface}; }}
+QCheckBox::indicator:checked, QTableView::indicator:checked {{ background: {p.brass}; border: 1px solid {p.brass_pressed}; }}
+QCheckBox::indicator:focus {{ border-color: {p.brass_text}; }}
 QProgressBar {{ background: {p.surface_alt}; border: none; border-radius: 3px; height: 6px; text-align: center; }}
 QProgressBar::chunk {{ background: {p.brass}; border-radius: 3px; }}
 """

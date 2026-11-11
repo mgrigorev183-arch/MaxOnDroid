@@ -48,6 +48,7 @@ class SavedDevice:
     kind: str = "unknown"
     network: NetworkAddress | None = None
     mdns_name: str | None = None
+    legacy_risk_accepted: bool = False  # the owner accepted open network adb on this device
     first_seen: str = ""
     last_seen: str = ""
     extra: dict = field(default_factory=dict)
@@ -74,7 +75,7 @@ class SavedDevice:
                 network = NetworkAddress(str(raw_net["host"]), int(raw_net["port"]), str(raw_net.get("mode", "paired")))
             except (KeyError, TypeError, ValueError):
                 network = None
-        known = {"key", "token", "alias", "model", "manufacturer", "kind", "network", "mdns_name", "first_seen", "last_seen"}
+        known = {"key", "token", "alias", "model", "manufacturer", "kind", "network", "mdns_name", "legacy_risk_accepted", "first_seen", "last_seen"}
         return cls(
             key=key,
             token=token,
@@ -84,6 +85,7 @@ class SavedDevice:
             kind=str(data.get("kind") or "unknown"),
             network=network,
             mdns_name=data.get("mdns_name"),
+            legacy_risk_accepted=data.get("legacy_risk_accepted") is True,
             first_seen=str(data.get("first_seen") or ""),
             last_seen=str(data.get("last_seen") or ""),
             extra={k: v for k, v in data.items() if k not in known},
@@ -175,6 +177,14 @@ class Registry:
             if saved is None:
                 return
             saved.alias = alias.strip()[:60]
+        self.save()
+
+    def set_risk_accepted(self, key: str, accepted: bool) -> None:
+        with self._lock:
+            saved = self._devices.get(key)
+            if saved is None:
+                return
+            saved.legacy_risk_accepted = accepted
         self.save()
 
     def forget(self, key: str) -> None:

@@ -27,12 +27,15 @@ from maxondroid.core.manager import DeviceManager, DeviceView, ManagerError
 from maxondroid.core.settings import THEMES
 from maxondroid.i18n import tr
 from maxondroid.ui import icons, theme
+from maxondroid.ui.apps_tab import AppsTab
 from maxondroid.ui.common import Banner, label
 from maxondroid.ui.connect_dialog import ConnectDialog
 from maxondroid.ui.context import AppContext
+from maxondroid.ui.debloat_tab import DebloatTab
 from maxondroid.ui.device_list import DeviceListView
 from maxondroid.ui.journal_panel import JournalPanel
 from maxondroid.ui.overview_tab import OverviewTab
+from maxondroid.ui.package_support import PackageCache
 from maxondroid.ui.settings_dialog import SettingsDialog
 
 POLL_MS = 2500
@@ -120,8 +123,13 @@ class MainWindow(QMainWindow):
         work_layout.addLayout(banner_box)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        ctx.packages = PackageCache(ctx, self)
         self.overview = OverviewTab(ctx)
-        self.tabs.addTab(self.overview, "")
+        self.apps = AppsTab(ctx)
+        self.debloat = DebloatTab(ctx)
+        for tab in (self.overview, self.apps, self.debloat):
+            self.tabs.addTab(tab, "")
+        self.setAcceptDrops(True)
         work_layout.addWidget(self.tabs, 1)
 
         self.journal_panel = JournalPanel(ctx.journal)
@@ -223,6 +231,10 @@ class MainWindow(QMainWindow):
         self.act_repo.setText(tr("menu.repo"))
         self.act_about.setText(tr("menu.about"))
         self.tabs.setTabText(0, tr("tab.overview"))
+        self.tabs.setTabText(1, tr("tab.apps"))
+        self.tabs.setTabText(2, tr("tab.debloat"))
+        self.apps.retranslate()
+        self.debloat.retranslate()
         self.connect_button.setText(tr("rail.connect"))
         self.rail_caption.setText(tr("rail.caption"))
         for button, key in ((self.rail_refresh, "menu.refresh"), (self.rail_settings, "menu.settings")):
@@ -246,6 +258,10 @@ class MainWindow(QMainWindow):
         self.connect_button.setIcon(icons.icon("plus", p.brass_on))
         self.journal_panel.set_palette(p)
         self.overview.apply_palette()
+        self.apps.apply_palette()
+        self.debloat.apply_palette()
+        self.apps.model.refresh_all()
+        self.debloat.model.refresh_all()
         if self._connect_dialog is not None:
             self._connect_dialog.retranslate()  # re-tints its icons
         self._render_adb_banner()
@@ -278,6 +294,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.timer.stop()
+        from maxondroid import i18n
+
+        i18n.remove_listener(getattr(self, "i18n_listener", None))
         s = self.ctx.settings.settings
         s.window_geometry = bytes(self.saveGeometry().toBase64()).decode()
         try:
@@ -380,6 +399,8 @@ class MainWindow(QMainWindow):
     def _selection_changed(self, key: str | None) -> None:
         view = next((v for v in self.views if v.key == key), None)
         self.overview.set_device(view, empty_list=not self.views)
+        self.apps.set_device(view)
+        self.debloat.set_device(view)
 
     def _device_menu(self, pos) -> None:
         index = self.device_list.indexAt(pos)
@@ -440,6 +461,17 @@ class MainWindow(QMainWindow):
         self.ctx.settings.save()
         self._apply_journal_size(expanded)
         self.act_journal.setChecked(expanded)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if AppsTab.dropped_files(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        files = AppsTab.dropped_files(event.mimeData())
+        if files:
+            event.acceptProposedAction()
+            self.tabs.setCurrentWidget(self.apps)
+            self.apps.install(files)
 
     def _about(self) -> None:
         QMessageBox.about(self, tr("menu.about"), tr("about.text", name=APP_NAME, version=__version__, url=REPO_URL))
