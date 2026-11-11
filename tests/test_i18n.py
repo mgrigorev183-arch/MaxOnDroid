@@ -49,10 +49,12 @@ def dynamic_keys() -> set[str]:
     keys |= {f"apps.col.{c}" for c in apps_tab.COLUMNS}
     keys |= {f"apps.kind.{k}" for k in ("all", "user", "system")}
     keys |= {f"apps.filter.{k}" for k in ("installed", "enabled", "disabled", "removed", "all")}
-    keys |= {f"debloat.col.{c}" for c in debloat_tab.COLUMNS if c != "check"}
+    keys |= {f"debloat.col.{c}" for c in debloat_tab.COLUMNS}
     keys |= {f"debloat.state.{k}" for k in ("installed", "changed", "all")}
     keys |= {f"removal.{r.value}" for r in uad.Removal} | {f"removal.desc.{r.value}" for r in uad.Removal}
-    keys |= {f"uadlist.{g}" for g in ("all",) + debloat_tab.GROUPS}
+    from maxondroid.core.publishers import Kind as PubKind
+
+    keys |= {f"publisher.{k.value}" for k in (PubKind.ANDROID, PubKind.CARRIER, PubKind.OTHERS)}
     keys |= {f"safety.reason.{r.value}" for r in safety.Reason}
     keys |= {f"pkg.critical.do.{a}" for a in ("remove_for_user", "disable")}
     keys |= {f"history.action.{a.value}" for a in __import__("maxondroid.core.changes", fromlist=["RECORDED"]).RECORDED}

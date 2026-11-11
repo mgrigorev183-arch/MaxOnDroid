@@ -176,6 +176,29 @@ class Placeholder(QWidget):
             self.button.setText(action)
 
 
+def open_folder(path) -> bool:
+    """Open a folder in Explorer, at its real location (see paths.explorer_path)."""
+    from pathlib import Path
+
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+
+    from maxondroid.core import paths
+
+    return QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.explorer_path(Path(path)))))
+
+
+def publisher_label(pub) -> str:
+    """Display name of a core.publishers.Publisher."""
+    from maxondroid.core.publishers import Kind as PubKind
+
+    if pub.kind is PubKind.DEVICE_MAKER:
+        return tr("publisher.device_maker", name=pub.name)
+    if pub.kind in (PubKind.ANDROID, PubKind.CARRIER, PubKind.OTHERS):
+        return tr(f"publisher.{pub.kind.value}")
+    return pub.name
+
+
 def kind_name(kind: Kind) -> str:
     return tr(f"kind.{kind.value}")
 

@@ -109,8 +109,8 @@ def test_apps_tab_lists_filters_and_shows_descriptions(win, qtbot):
     assert tab.proxy.rowCount() == 8  # removed tvrecommendations hidden by default
     tab.search.setText("youtube")
     assert tab.proxy.rowCount() == 1
-    index = tab.proxy.index(0, 4)
-    assert index.data() == "YouTube app"
+    assert tab.proxy.index(0, 5).data() == "YouTube app"
+    assert tab.proxy.index(0, 1).data() == "Google"
     tab.search.clear()
     tab.kind.setCurrentIndex(tab.kind.findData("user"))
     assert [tab.proxy.index(r, 0).data() for r in range(tab.proxy.rowCount())] == ["org.videolan.vlc"]
@@ -166,13 +166,26 @@ def test_drag_and_drop_installs(win, qtbot, fake_adb, tmp_path):
     assert Path(call[4]) == apk_file
 
 
-def tick(tab, name):
-    for row in range(tab.proxy.rowCount()):
-        index = tab.proxy.index(row, 0)
-        if tab.proxy.index(row, 1).data() == name:
-            tab.proxy.setData(index, Qt.CheckState.Checked.value, Qt.ItemDataRole.CheckStateRole)
-            return
+def tree_items(tab):
+    """(group label, [package names]) for every group row, in display order."""
+    out = []
+    for row in range(tab.model.rowCount()):
+        head = tab.model.item(row, 0)
+        out.append((head.text(), [head.child(r, 0).text() for r in range(head.rowCount())]))
+    return out
+
+
+def package_item(tab, name):
+    for row in range(tab.model.rowCount()):
+        head = tab.model.item(row, 0)
+        for r in range(head.rowCount()):
+            if head.child(r, 0).text() == name:
+                return head.child(r, 0)
     raise AssertionError(name)
+
+
+def tick(tab, name):
+    package_item(tab, name).setCheckState(Qt.CheckState.Checked)
 
 
 def test_debloat_remove_critical_blocked_and_undo(win, qtbot, fake_adb, accept_all):
@@ -181,13 +194,19 @@ def test_debloat_remove_critical_blocked_and_undo(win, qtbot, fake_adb, accept_a
     tab = win.debloat
     qtbot.waitUntil(lambda: tab.stack.currentIndex() == 1, timeout=5000)
     assert "База UAD-ng" in tab.db_label.text() and "встроенная" in tab.db_label.text()
-    names = {tab.proxy.index(r, 1).data() for r in range(tab.proxy.rowCount())}
-    assert "com.google.android.youtube.tv" in names and "com.android.systemui" not in names  # Unsafe hidden by default
-    tab.table.selectRow(0)
-    assert tab.details.toPlainText()
+    groups = tree_items(tab)
+    assert [g[0] for g in groups] == ["Xiaomi — производитель устройства · 1", "Google · 3", "Остальные · 2"]
+    names = {n for _, members in groups for n in members}
+    assert "com.android.systemui" not in names  # risk 4 is hidden by default
+    assert set(groups[-1][1]) == {"com.netflix.ninja", "org.videolan.vlc"}  # single-app publishers
+    youtube = package_item(tab, "com.google.android.youtube.tv")
+    risk = youtube.parent().child(youtube.row(), 1).text()
+    assert risk == "1 · без последствий"
+    tab.tree.setCurrentIndex(youtube.index())
+    details = tab.details.toPlainText()
+    assert "Риск удаления 1 из 4" in details and "Само приложение пропадёт" in details and "Издатель: Google" in details
     tab.level_buttons[debloat_tab.uad.Removal.UNSAFE].setChecked(True)
-    tab.level_buttons[debloat_tab.uad.Removal.EXPERT].setChecked(True)
-    tab.unlisted.setChecked(True)
+    assert tree_items(tab)[0] == ("Android (система) · 2", ["com.android.shell", "com.android.systemui"])
     tick(tab, "com.google.android.youtube.tv")
     tick(tab, "com.google.android.apps.tv.launcherx")
     tick(tab, "com.android.shell")
@@ -256,7 +275,7 @@ def test_stage2_screenshots(win, qtbot):
         qtbot.wait(100)
         win.grab().save(str(out / f"stage2-apps-{code}.png"))
         win.tabs.setCurrentWidget(win.debloat)
-        win.debloat.table.selectRow(1)
+        win.debloat.tree.setCurrentIndex(package_item(win.debloat, "com.google.android.youtube.tv").index())
         qtbot.wait(100)
         win.grab().save(str(out / f"stage2-debloat-{code}.png"))
     win._set_theme("light")
@@ -274,3 +293,38 @@ def test_failed_package_list_offers_retry(win, qtbot, fake_adb):
     placeholder.button.click()
     qtbot.waitUntil(lambda: win.apps.stack.currentIndex() == 1, timeout=5000)
     assert win.debloat.stack.currentIndex() == 1
+
+
+def test_group_tick_and_publisher_filter(win, qtbot):
+    win.tabs.setCurrentWidget(win.debloat)
+    tab = win.debloat
+    qtbot.waitUntil(lambda: tab.stack.currentIndex() == 1, timeout=5000)
+    google = next(tab.model.item(r, 0) for r in range(tab.model.rowCount()) if tab.model.item(r, 0).text().startswith("Google"))
+    google.setCheckState(Qt.CheckState.Checked)
+    members = {google.child(r, 0).text() for r in range(google.rowCount())}
+    assert members and members <= tab.checked
+    one = google.child(0, 0)
+    one_name = one.text()
+    one.setCheckState(Qt.CheckState.Unchecked)
+    assert google.checkState() == Qt.CheckState.PartiallyChecked
+    tab.search.setText("youtube")  # filtering rebuilds the tree but keeps the ticks
+    assert tab.checked == members - {one_name}
+    tab.search.clear()
+
+    def google_index():
+        return next(tab.model.index(r, 0) for r in range(tab.model.rowCount()) if tab.model.item(r, 0).text().startswith("Google"))
+
+    tab.tree.collapse(google_index())
+    tab.rebuild()
+    assert not tab.tree.isExpanded(google_index())  # folds survive a rebuild
+    tab._set_all_expanded(True)
+    assert tab.tree.isExpanded(google_index())
+
+    win.tabs.setCurrentWidget(win.apps)
+    apps = win.apps
+    labels = [apps.publisher.itemText(i) for i in range(apps.publisher.count())]
+    assert labels[0] == "Все издатели" and "Google" in labels and "Остальные" in labels
+    apps.publisher.setCurrentIndex(apps.publisher.findData("google"))
+    shown = {apps.proxy.index(r, 0).data() for r in range(apps.proxy.rowCount())}
+    assert shown == {"com.google.android.youtube.tv", "com.google.android.apps.tv.launcherx", "com.google.android.inputmethod.latin"}
+    assert apps.proxy.index(0, 1).data() == "Google"

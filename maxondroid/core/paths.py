@@ -83,3 +83,55 @@ def app_root() -> Path:
 def bundled_tools_dir() -> Path:
     """Folder that ships adb and scrcpy with the installer."""
     return app_root() / "tools"
+
+
+# --- Python from the Microsoft Store -----------------------------------------------
+#
+# The Store build of Python runs as a packaged app. Windows quietly redirects its
+# writes to %APPDATA% and %LOCALAPPDATA% into
+#   %LOCALAPPDATA%\Packages\<package family>\LocalCache\{Roaming,Local}
+# The app itself sees its files at the usual paths, but Explorer does not, so
+# folders opened for the user must be translated to the real location.
+
+def package_family_name() -> str | None:
+    """The MSIX package this process runs in (Store Python), or None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        length = ctypes.c_uint32(0)
+        kernel32 = ctypes.windll.kernel32
+        rc = kernel32.GetCurrentPackageFamilyName(ctypes.byref(length), None)
+        if rc != 122 or length.value == 0:  # 122: buffer too small, i.e. there is a package
+            return None
+        buffer = ctypes.create_unicode_buffer(length.value)
+        if kernel32.GetCurrentPackageFamilyName(ctypes.byref(length), buffer) != 0:
+            return None
+        return buffer.value or None
+    except (AttributeError, OSError):
+        return None
+
+
+def explorer_path(path: Path, family: str | None = None, env: dict | None = None) -> Path:
+    """Where ``path`` really is on disk, for showing it in Explorer."""
+    env = os.environ if env is None else env
+    family = family if family is not None else package_family_name()
+    local = env.get("LOCALAPPDATA")
+    if not family or not local:
+        return path
+    cache = Path(local) / "Packages" / family / "LocalCache"
+    for variable, folder in (("APPDATA", "Roaming"), ("LOCALAPPDATA", "Local")):
+        base = env.get(variable)
+        if not base:
+            continue
+        try:
+            rest = Path(path).relative_to(Path(base))
+        except ValueError:
+            continue
+        if rest.parts and rest.parts[0] == "Packages":
+            return path  # already a real package path
+        mapped = cache / folder / rest
+        return mapped if mapped.exists() else path
+    return path
+

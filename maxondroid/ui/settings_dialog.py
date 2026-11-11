@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,7 +23,7 @@ from maxondroid.core import paths
 from maxondroid.core.adb import AdbRunner, find_adb
 from maxondroid.core.settings import LANGUAGES, THEMES, Settings
 from maxondroid.i18n import tr
-from maxondroid.ui.common import label
+from maxondroid.ui.common import label, open_folder
 from maxondroid.ui.context import AppContext
 
 
@@ -78,13 +77,15 @@ class SettingsDialog(QDialog):
 
         folder_row = QHBoxLayout()
         open_config = QPushButton(tr("settings.open_config"))
-        open_config.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.config_dir()))))
+        open_config.clicked.connect(lambda: open_folder(paths.config_dir()))
         open_logs = QPushButton(tr("settings.open_logs"))
-        open_logs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.log_dir()))))
+        open_logs.clicked.connect(lambda: open_folder(paths.log_dir()))
         folder_row.addWidget(open_config)
         folder_row.addWidget(open_logs)
         folder_row.addStretch(1)
         layout.addLayout(folder_row)
+        where = label(tr("settings.data_location", path=str(paths.explorer_path(paths.config_dir()))), role="muted", wrap=True, selectable=True)
+        layout.addWidget(where)
         layout.addStretch(1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)

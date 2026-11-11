@@ -1,4 +1,4 @@
-"""Debloat tab: packages known to the UAD-ng list, with safety levels, presets and undo."""
+"""Debloat tab: the device's packages grouped by publisher, with removal risk, presets and undo."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QSortFilterProxyModel, Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -25,16 +25,16 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStackedWidget,
-    QTableView,
     QTextBrowser,
     QToolButton,
+    QTreeView,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from maxondroid.core import paths, presets, safety, uad
+from maxondroid.core import paths, presets, publishers, safety, uad
 from maxondroid.core.changes import Change
 from maxondroid.core.manager import DeviceView
 from maxondroid.core.packages import Action, Package, PkgState, Snapshot
@@ -42,14 +42,15 @@ from maxondroid.core.presets import PlanStatus, Preset, PresetAction
 from maxondroid.i18n import tr
 from maxondroid.ui import icons, theme
 from maxondroid.ui.apps_tab import state_text
-from maxondroid.ui.common import Banner, Placeholder, label, refilter
+from maxondroid.ui.common import Banner, Placeholder, label, open_folder, publisher_label
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.package_support import confirm, confirm_destructive, describe_reasons, make_ops, summarize
 
-COLUMNS = ("check", "package", "removal", "list", "state")
+COLUMNS = ("package", "risk", "state")
 LEVELS = (uad.Removal.RECOMMENDED, uad.Removal.ADVANCED, uad.Removal.EXPERT, uad.Removal.UNSAFE)
-GROUPS = ("Oem", "Google", "Aosp", "Carrier", "Misc")
-RowRole = Qt.ItemDataRole.UserRole + 20
+RISK_NUMBER = {uad.Removal.RECOMMENDED: "1", uad.Removal.ADVANCED: "2", uad.Removal.EXPERT: "3", uad.Removal.UNSAFE: "4", uad.Removal.UNLISTED: "?"}
+PackageRole = Qt.ItemDataRole.UserRole + 20  # (Package, Entry | None) on package rows
+GroupRole = Qt.ItemDataRole.UserRole + 21  # publisher id on group rows
 
 
 def presets_dir() -> Path:
@@ -58,137 +59,8 @@ def presets_dir() -> Path:
     return folder
 
 
-class DebloatModel(QAbstractTableModel):
-    def __init__(self, ctx: AppContext, parent: QObject | None = None):
-        super().__init__(parent)
-        self.ctx = ctx
-        self.rows: list[tuple[Package, uad.Entry | None]] = []
-        self.checked: set[str] = set()
-
-    def refresh_all(self) -> None:
-        """Repaint every cell after a language or theme change (the rows themselves did not change)."""
-        if self.rows:
-            self.dataChanged.emit(self.index(0, 0), self.index(len(self.rows) - 1, self.columnCount() - 1))
-
-    def rowCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802
-        return 0 if parent is not None and parent.isValid() else len(self.rows)
-
-    def columnCount(self, parent: QModelIndex | None = None) -> int:  # noqa: N802
-        return len(COLUMNS)
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal and section > 0:
-            return tr(f"debloat.col.{COLUMNS[section]}")
-        return None
-
-    def set_rows(self, rows: list[tuple[Package, uad.Entry | None]]) -> None:
-        self.beginResetModel()
-        self.rows = rows
-        names = {p.name for p, _ in rows}
-        self.checked &= names
-        self.endResetModel()
-
-    def flags(self, index):
-        base = super().flags(index)
-        if index.column() == 0:
-            return base | Qt.ItemFlag.ItemIsUserCheckable
-        return base
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        pkg, entry = self.rows[index.row()]
-        column = COLUMNS[index.column()]
-        removal = entry.removal if entry else uad.Removal.UNLISTED
-        if role == RowRole:
-            return pkg, entry
-        if role == Qt.ItemDataRole.CheckStateRole and column == "check":
-            return Qt.CheckState.Checked if pkg.name in self.checked else Qt.CheckState.Unchecked
-        if role == Qt.ItemDataRole.AccessibleTextRole and column == "check":
-            return pkg.name
-        if role == Qt.ItemDataRole.DisplayRole:
-            if column == "package":
-                return pkg.name
-            if column == "removal":
-                return tr(f"removal.{removal.value}")
-            if column == "list":
-                return tr(f"uadlist.{entry.list}") if entry and tr(f"uadlist.{entry.list}") != f"uadlist.{entry.list}" else (entry.list if entry else "—")
-            if column == "state":
-                return state_text(pkg.state)
-        if role == Qt.ItemDataRole.ForegroundRole:
-            p = self.ctx.palette
-            if column == "removal":
-                if removal is uad.Removal.UNSAFE:
-                    return QColor(p.danger_text)
-                if removal is uad.Removal.EXPERT:
-                    return QColor(p.brass_text)
-                if removal is uad.Removal.UNLISTED:
-                    return QColor(p.text_muted)
-            if column in ("package", "state") and pkg.state is not PkgState.ENABLED:
-                return QColor(p.text_muted)
-        if role == Qt.ItemDataRole.FontRole and column == "package":
-            return theme.mono_font(9)
-        if role == Qt.ItemDataRole.ToolTipRole and column == "package":
-            return pkg.name + ("\n" + entry.summary if entry and entry.summary else "")
-        return None
-
-    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):  # noqa: N802
-        if index.isValid() and role == Qt.ItemDataRole.CheckStateRole and index.column() == 0:
-            name = self.rows[index.row()][0].name
-            checked = Qt.CheckState(value) == Qt.CheckState.Checked
-            (self.checked.add if checked else self.checked.discard)(name)
-            self.dataChanged.emit(index, index, [role])
-            return True
-        return False
-
-    def set_checked(self, names: set[str], checked: bool) -> None:
-        if checked:
-            self.checked |= names
-        else:
-            self.checked -= names
-        if self.rows:
-            self.dataChanged.emit(self.index(0, 0), self.index(len(self.rows) - 1, 0))
-
-
-class DebloatFilter(QSortFilterProxyModel):
-    def __init__(self, parent: QObject | None = None):
-        super().__init__(parent)
-        self.text = ""
-        self.levels: set[uad.Removal] = {uad.Removal.RECOMMENDED, uad.Removal.ADVANCED}
-        self.group = "all"
-        self.state = "installed"
-        self.unlisted = False
-        self.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-
-    def refilter(self) -> None:
-        refilter(self)
-
-    def filterAcceptsRow(self, row: int, parent) -> bool:  # noqa: N802
-        pkg, entry = self.sourceModel().rows[row]
-        if entry is None:
-            if not self.unlisted:
-                return False
-        elif entry.removal not in self.levels:
-            return False
-        if self.group != "all" and (entry is None or entry.list != self.group):
-            return False
-        if self.state == "installed" and pkg.state is PkgState.REMOVED:
-            return False
-        if self.state == "changed" and pkg.state is PkgState.ENABLED:
-            return False
-        if self.text:
-            haystack = pkg.name.lower() + " " + (entry.description.lower() if entry else "")
-            if self.text not in haystack:
-                return False
-        return True
-
-    def lessThan(self, left, right) -> bool:  # noqa: N802
-        if left.column() == 2:
-            order = {lvl: i for i, lvl in enumerate(uad.REMOVAL_ORDER)}
-            le = left.data(RowRole)[1]
-            ri = right.data(RowRole)[1]
-            return order[le.removal if le else uad.Removal.UNLISTED] < order[ri.removal if ri else uad.Removal.UNLISTED]
-        return super().lessThan(left, right)
+def risk_of(entry: uad.Entry | None) -> uad.Removal:
+    return entry.removal if entry else uad.Removal.UNLISTED
 
 
 class DebloatTab(QWidget):
@@ -197,6 +69,10 @@ class DebloatTab(QWidget):
         self.ctx = ctx
         self.view: DeviceView | None = None
         self._busy = False
+        self.checked: set[str] = set()
+        self._collapsed: set[str] = set()  # publisher ids the user folded
+        self._building = False
+        self._shown = 0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -236,12 +112,11 @@ class DebloatTab(QWidget):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
         filters.addWidget(self.search, 1)
-        self.group = QComboBox()
         self.state = QComboBox()
-        for combo in (self.group, self.state):
-            combo.currentIndexChanged.connect(self._filter)
-            filters.addWidget(combo)
+        self.state.currentIndexChanged.connect(self._filter)
+        filters.addWidget(self.state)
         layout.addLayout(filters)
+
         levels = QHBoxLayout()
         levels.setSpacing(6)
         self.levels_label = label("", role="muted")
@@ -251,50 +126,50 @@ class DebloatTab(QWidget):
             button = QToolButton()
             button.setProperty("filter", True)
             button.setCheckable(True)
-            button.setChecked(level in (uad.Removal.RECOMMENDED, uad.Removal.ADVANCED))
+            button.setChecked(level is not uad.Removal.UNSAFE)
             button.toggled.connect(self._filter)
             self.level_buttons[level] = button
             levels.addWidget(button)
         levels.addSpacing(12)
         self.unlisted = QCheckBox()
+        self.unlisted.setChecked(True)
         self.unlisted.toggled.connect(self._filter)
         levels.addWidget(self.unlisted)
         levels.addStretch(1)
+        self.expand_button = QToolButton()
+        self.expand_button.setAutoRaise(True)
+        self.expand_button.clicked.connect(lambda: self._set_all_expanded(True))
+        self.collapse_button = QToolButton()
+        self.collapse_button.setAutoRaise(True)
+        self.collapse_button.clicked.connect(lambda: self._set_all_expanded(False))
+        levels.addWidget(self.expand_button)
+        levels.addWidget(self.collapse_button)
         layout.addLayout(levels)
 
         self.banner = Banner("info")
         layout.addWidget(self.banner)
 
-        self.model = DebloatModel(ctx, self)
-        self.model.dataChanged.connect(lambda *_: self._update_buttons())
-        self.proxy = DebloatFilter(self)
-        self.proxy.setSourceModel(self.model)
-        self.table = QTableView()
-        self.table.setModel(self.proxy)
-        self.table.setSortingEnabled(True)
-        self.table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setAlternatingRowColors(True)
-        self.table.setShowGrid(False)
-        self.table.setWordWrap(False)
-        self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(26)
-        head_view = self.table.horizontalHeader()
-        head_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        head_view.resizeSection(0, 30)
-        head_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for column in (2, 3, 4):
-            head_view.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.selectionModel().currentRowChanged.connect(lambda *_: self._show_details())
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._context_menu)
+        self.model = QStandardItemModel(self)
+        self.model.itemChanged.connect(self._item_changed)
+        self.tree = QTreeView()
+        self.tree.setModel(self.model)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setAllColumnsShowFocus(True)
+        self.tree.expanded.connect(lambda index: self._collapsed.discard(index.data(GroupRole)))
+        self.tree.collapsed.connect(lambda index: self._collapsed.add(index.data(GroupRole)))
+        self.tree.selectionModel().currentRowChanged.connect(lambda *_: self._show_details())
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
 
         self.details = QTextBrowser()
         self.details.setOpenExternalLinks(True)
         self.details.setMinimumWidth(240)
         split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(self.table)
+        split.addWidget(self.tree)
         split.addWidget(self.details)
         split.setStretchFactor(0, 2)
         split.setStretchFactor(1, 1)
@@ -308,7 +183,7 @@ class DebloatTab(QWidget):
         self.check_visible = QPushButton()
         self.check_visible.clicked.connect(lambda: self._check_selection(True))
         self.uncheck_button = QPushButton()
-        self.uncheck_button.clicked.connect(lambda: self.model.set_checked(set(self.model.checked), False))
+        self.uncheck_button.clicked.connect(lambda: self.set_checked(set(self.checked), False))
         self.restore_button = QPushButton()
         self.restore_button.clicked.connect(self.restore_checked)
         self.disable_button = QPushButton()
@@ -329,45 +204,48 @@ class DebloatTab(QWidget):
     def retranslate(self) -> None:
         self.search.setPlaceholderText(tr("debloat.search"))
         self.update_button.setText(tr("debloat.update_db"))
+        self.update_button.setToolTip(tr("debloat.update_db.tip", url=uad.UAD_URL))
         self.refresh_button.setToolTip(tr("debloat.refresh"))
         self.refresh_button.setAccessibleName(tr("debloat.refresh"))
-        self.update_button.setToolTip(tr("debloat.update_db.tip", url=uad.UAD_URL))
         self.presets_button.setText(tr("debloat.presets"))
-        for level, button in self.level_buttons.items():
-            button.setText(tr(f"removal.{level.value}"))
-            button.setToolTip(tr(f"removal.desc.{level.value}"))
-        for combo, values, prefix in ((self.group, ("all",) + GROUPS, "uadlist"), (self.state, ("installed", "changed", "all"), "debloat.state")):
-            current = combo.currentData()
-            combo.blockSignals(True)
-            combo.clear()
-            for value in values:
-                combo.addItem(tr(f"{prefix}.{value}"), value)
-            combo.setCurrentIndex(max(0, combo.findData(current)))
-            combo.blockSignals(False)
-        self.unlisted.setText(tr("debloat.unlisted"))
         self.levels_label.setText(tr("debloat.levels"))
+        for level, button in self.level_buttons.items():
+            button.setText(RISK_NUMBER[level])
+            button.setToolTip(tr(f"removal.{level.value}") + " — " + tr(f"removal.desc.{level.value}"))
+            button.setAccessibleName(tr("debloat.level_button", level=RISK_NUMBER[level]) + ": " + tr(f"removal.desc.{level.value}"))
+        current = self.state.currentData()
+        self.state.blockSignals(True)
+        self.state.clear()
+        for value in ("installed", "changed", "all"):
+            self.state.addItem(tr(f"debloat.state.{value}"), value)
+        self.state.setCurrentIndex(max(0, self.state.findData(current)))
+        self.state.blockSignals(False)
+        self.unlisted.setText(tr("debloat.unlisted"))
+        self.expand_button.setText(tr("debloat.expand_all"))
+        self.collapse_button.setText(tr("debloat.collapse_all"))
         self.check_visible.setText(tr("debloat.check_selected"))
         self.uncheck_button.setText(tr("debloat.uncheck"))
         self.restore_button.setText(tr("pkg.action.restore"))
         self.disable_button.setText(tr("pkg.action.disable"))
         self.remove_button.setText(tr("pkg.action.remove"))
-        self.model.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(COLUMNS) - 1)
-        self.model.refresh_all()
         self.apply_palette()
-        self.render()
+        self.render(force=True)
 
     def apply_palette(self) -> None:
         self.update_button.setIcon(icons.icon("refresh", self.ctx.palette.text))
         self.refresh_button.setIcon(icons.icon("refresh", self.ctx.palette.text_muted))
-        self._show_details()
+        self.rebuild()
+
+    def refresh_texts(self) -> None:
+        self.rebuild()
 
     # -- data ------------------------------------------------------------------
     def set_device(self, view: DeviceView | None) -> None:
         new_device = self.view is None or view is None or self.view.key != view.key
         came_online = not new_device and view is not None and view.online and not self.view.online
         changed = new_device or came_online or (view is not None and self.view is not None and self.view.online != view.online)
-        if self.view is not None and view is not None and self.view.key != view.key:
-            self.model.checked.clear()
+        if new_device:
+            self.checked.clear()
         self.view = view
         if changed:
             self.banner.hide()
@@ -375,7 +253,7 @@ class DebloatTab(QWidget):
                 self.ctx.packages.load(view)
             else:
                 self.ctx.packages.ensure(view)
-            self.render()
+            self.render(force=True)
 
     def snapshot(self) -> Snapshot | None:
         return self.ctx.packages.get(self.view.key) if self.view else None
@@ -386,9 +264,9 @@ class DebloatTab(QWidget):
 
     def _cache_changed(self, key: str) -> None:
         if self.view is not None and key == self.view.key:
-            self.render()
+            self.render(force=True)
 
-    def render(self) -> None:
+    def render(self, force: bool = False) -> None:
         self._render_db_label()
         view = self.view
         cache = self.ctx.packages
@@ -405,13 +283,9 @@ class DebloatTab(QWidget):
             self.stack.setCurrentIndex(0)
             return
         self.stack.setCurrentIndex(1)
-        db = self.ctx.uad
-        rows = [(pkg, db.get(pkg.name) if db else None) for pkg in snapshot.packages.values()]
-        if rows != self.model.rows:
-            self.model.set_rows(rows)
-        self._update_counts()
+        if force:
+            self.rebuild()
         self._update_buttons()
-        self._show_details()
 
     def _render_db_label(self) -> None:
         db = self.ctx.uad
@@ -421,23 +295,183 @@ class DebloatTab(QWidget):
         source = tr(f"debloat.db.{db.source.value}")
         self.db_label.setText(tr("debloat.db.info", count=f"{len(db.entries):,}".replace(",", " "), source=source, date=db.date or "—"))
 
-    def _filter(self, *_args) -> None:
-        self.proxy.text = self.search.text().strip().lower()
-        self.proxy.levels = {lvl for lvl, b in self.level_buttons.items() if b.isChecked()}
-        self.proxy.group = self.group.currentData() or "all"
-        self.proxy.state = self.state.currentData() or "installed"
-        self.proxy.unlisted = self.unlisted.isChecked()
-        self.proxy.refilter()
+    def publishers(self) -> dict[str, publishers.Publisher]:
+        snapshot = self.snapshot()
+        if snapshot is None:
+            return {}
+        db = self.ctx.uad
+        names = list(snapshot.packages)
+        entries = {n: db.get(n) for n in names} if db else {}
+        return publishers.group_packages(names, entries, self.view.manufacturer if self.view else None)
+
+    def _visible(self, pkg: Package, entry: uad.Entry | None) -> bool:
+        if entry is None:
+            if not self.unlisted.isChecked():
+                return False
+        else:
+            button = self.level_buttons.get(entry.removal)
+            if button is not None and not button.isChecked():
+                return False
+        state = self.state.currentData() or "installed"
+        if state == "installed" and pkg.state is PkgState.REMOVED:
+            return False
+        if state == "changed" and pkg.state is PkgState.ENABLED:
+            return False
+        text = self.search.text().strip().lower()
+        if text and text not in pkg.name.lower() and (entry is None or text not in entry.description.lower()):
+            return False
+        return True
+
+    # -- the tree ---------------------------------------------------------------
+    def rebuild(self) -> None:
+        """Rebuild the grouped tree from the snapshot and the filters, keeping ticks, folds and the cursor."""
+        snapshot = self.snapshot()
+        current = self.tree.currentIndex().data(PackageRole) if hasattr(self, "tree") else None
+        current_name = current[0].name if current else None
+        self._building = True
+        try:
+            self.model.clear()
+            self.model.setHorizontalHeaderLabels([tr(f"debloat.col.{c}") for c in COLUMNS])
+            self._shown = 0
+            if snapshot is None:
+                return
+            db = self.ctx.uad
+            pubs = self.publishers()
+            groups: dict[str, tuple[publishers.Publisher, list[tuple[Package, uad.Entry | None]]]] = {}
+            for name, pkg in snapshot.packages.items():
+                entry = db.get(name) if db else None
+                if not self._visible(pkg, entry):
+                    continue
+                pub = pubs.get(name, publishers.OTHERS)
+                groups.setdefault(pub.id, (pub, []))[1].append((pkg, entry))
+            p = self.ctx.palette
+            bold = QFont(self.font())
+            bold.setWeight(QFont.Weight.DemiBold)
+            mono = theme.mono_font(9)
+            current_index = None
+            for pub, rows in sorted(groups.values(), key=lambda g: publishers.sort_key(g[0])):
+                rows.sort(key=lambda r: r[0].name)
+                head = QStandardItem(tr("debloat.group", name=publisher_label(pub), count=len(rows)))
+                head.setData(pub.id, GroupRole)
+                head.setFont(bold)
+                head.setCheckable(True)
+                head.setAccessibleText(publisher_label(pub))
+                filler = [QStandardItem(""), QStandardItem("")]
+                for item in [head, *filler]:
+                    item.setEditable(False)
+                for pkg, entry in rows:
+                    risk = risk_of(entry)
+                    name_item = QStandardItem(pkg.name)
+                    name_item.setData((pkg, entry), PackageRole)
+                    name_item.setCheckable(True)
+                    name_item.setCheckState(Qt.CheckState.Checked if pkg.name in self.checked else Qt.CheckState.Unchecked)
+                    name_item.setFont(mono)
+                    name_item.setToolTip(pkg.name + (f"\n{entry.summary}" if entry and entry.summary else ""))
+                    risk_item = QStandardItem(tr(f"removal.{risk.value}"))
+                    risk_item.setToolTip(tr(f"removal.desc.{risk.value}"))
+                    state_item = QStandardItem(state_text(pkg.state))
+                    if risk is uad.Removal.UNSAFE:
+                        risk_item.setForeground(QColor(p.danger_text))
+                    elif risk is uad.Removal.EXPERT:
+                        risk_item.setForeground(QColor(p.brass_text))
+                    elif risk is uad.Removal.UNLISTED:
+                        risk_item.setForeground(QColor(p.text_muted))
+                    if pkg.state is not PkgState.ENABLED:
+                        name_item.setForeground(QColor(p.text_muted))
+                        state_item.setForeground(QColor(p.text_muted))
+                    for item in (name_item, risk_item, state_item):
+                        item.setEditable(False)
+                    head.appendRow([name_item, risk_item, state_item])
+                    if pkg.name == current_name:
+                        current_index = name_item
+                    self._shown += 1
+                self._sync_group(head)
+                self.model.appendRow([head, *filler])
+            for row in range(self.model.rowCount()):
+                index = self.model.index(row, 0)
+                self.tree.setExpanded(index, index.data(GroupRole) not in self._collapsed)
+            header = self.tree.header()
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setStretchLastSection(False)
+            if current_index is not None:
+                self.tree.setCurrentIndex(current_index.index())
+        finally:
+            self._building = False
         self._update_counts()
+        self._show_details()
+
+    def _sync_group(self, head: QStandardItem) -> None:
+        children = [head.child(r, 0) for r in range(head.rowCount())]
+        ticked = sum(1 for c in children if c.checkState() == Qt.CheckState.Checked)
+        if ticked == 0:
+            state = Qt.CheckState.Unchecked
+        elif ticked == len(children):
+            state = Qt.CheckState.Checked
+        else:
+            state = Qt.CheckState.PartiallyChecked
+        head.setCheckState(state)
+
+    def _item_changed(self, item: QStandardItem) -> None:
+        if self._building:
+            return
+        self._building = True
+        try:
+            data = item.data(PackageRole)
+            if data is not None:
+                name = data[0].name
+                (self.checked.add if item.checkState() == Qt.CheckState.Checked else self.checked.discard)(name)
+                if item.parent() is not None:
+                    self._sync_group(item.parent())
+            elif item.data(GroupRole) is not None:
+                tick = item.checkState() != Qt.CheckState.Unchecked
+                if item.checkState() == Qt.CheckState.PartiallyChecked:
+                    item.setCheckState(Qt.CheckState.Checked)
+                for row in range(item.rowCount()):
+                    child = item.child(row, 0)
+                    child.setCheckState(Qt.CheckState.Checked if tick else Qt.CheckState.Unchecked)
+                    (self.checked.add if tick else self.checked.discard)(child.data(PackageRole)[0].name)
+        finally:
+            self._building = False
+        self._update_buttons()
+
+    def set_checked(self, names: set[str], checked: bool) -> None:
+        if checked:
+            self.checked |= names
+        else:
+            self.checked -= names
+        self._building = True
+        try:
+            for row in range(self.model.rowCount()):
+                head = self.model.item(row, 0)
+                for child_row in range(head.rowCount()):
+                    child = head.child(child_row, 0)
+                    if child.data(PackageRole)[0].name in names:
+                        child.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+                self._sync_group(head)
+        finally:
+            self._building = False
+        self._update_buttons()
+
+    def _set_all_expanded(self, expanded: bool) -> None:
+        for row in range(self.model.rowCount()):
+            self.tree.setExpanded(self.model.index(row, 0), expanded)
+
+    def _filter(self, *_args) -> None:
+        self.rebuild()
 
     def _update_counts(self) -> None:
-        self.count_label.setText(tr("debloat.count", shown=self.proxy.rowCount(), checked=len(self.model.checked)))
+        self.count_label.setText(tr("debloat.count", shown=self._shown, checked=len(self.checked)))
         if self.view:
             pending = len(self.ctx.changes.pending(self.view.key)) if self.ctx.changes else 0
             self.history_button.setText(tr("debloat.history", count=pending))
 
     def checked_packages(self) -> list[Package]:
-        return [p for p, _ in self.model.rows if p.name in self.model.checked]
+        snapshot = self.snapshot()
+        if snapshot is None:
+            return []
+        return [pkg for name, pkg in snapshot.packages.items() if name in self.checked]
 
     def _update_buttons(self) -> None:
         items = self.checked_packages()
@@ -450,29 +484,48 @@ class DebloatTab(QWidget):
         self.update_button.setEnabled(not busy)
         self._update_counts()
 
+    def _selected_names(self) -> set[str]:
+        names = set()
+        for index in self.tree.selectionModel().selectedRows():
+            data = index.data(PackageRole)
+            if data is not None:
+                names.add(data[0].name)
+            else:  # a group row: everything shown under it
+                head = self.model.itemFromIndex(index)
+                for row in range(head.rowCount()):
+                    names.add(head.child(row, 0).data(PackageRole)[0].name)
+        return names
+
     def _check_selection(self, checked: bool) -> None:
-        names = {index.data(RowRole)[0].name for index in self.table.selectionModel().selectedRows()}
+        names = self._selected_names()
         if names:
-            self.model.set_checked(names, checked)
+            self.set_checked(names, checked)
 
     def _context_menu(self, pos) -> None:
         menu = QMenu(self)
         menu.addAction(tr("debloat.check_selected"), lambda: self._check_selection(True))
         menu.addAction(tr("debloat.uncheck_selected"), lambda: self._check_selection(False))
-        menu.exec(self.table.viewport().mapToGlobal(pos))
+        menu.addSeparator()
+        menu.addAction(tr("debloat.expand_all"), lambda: self._set_all_expanded(True))
+        menu.addAction(tr("debloat.collapse_all"), lambda: self._set_all_expanded(False))
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
 
     def _show_details(self) -> None:
-        index = self.table.currentIndex()
-        if not index.isValid():
-            self.details.setHtml(f"<p style='color:{self.ctx.palette.text_muted}'>{html.escape(tr('debloat.details.empty'))}</p>")
-            return
-        pkg, entry = index.data(RowRole)
+        index: QModelIndex = self.tree.currentIndex()
+        data = index.sibling(index.row(), 0).data(PackageRole) if index.isValid() else None
         p = self.ctx.palette
-        removal = entry.removal if entry else uad.Removal.UNLISTED
+        if data is None:
+            self.details.setHtml(f"<p style='color:{p.text_muted}'>{html.escape(tr('debloat.details.empty'))}</p>")
+            return
+        pkg, entry = data
+        removal = risk_of(entry)
         verdict = safety.classify(pkg.name, entry, self.snapshot())
+        pub = self.publishers().get(pkg.name)
         parts = [f"<p style='font-family:Consolas,monospace;font-size:10pt'><b>{html.escape(pkg.name)}</b></p>"]
+        if pub is not None:
+            parts.append(f"<p style='color:{p.text_muted}'>{html.escape(tr('debloat.details.publisher', name=publisher_label(pub)))}</p>")
         parts.append(
-            f"<p><b>{html.escape(tr(f'removal.{removal.value}'))}</b> — {html.escape(tr(f'removal.desc.{removal.value}'))}</p>"
+            f"<p><b>{html.escape(tr('debloat.details.risk', level=RISK_NUMBER[removal]))}</b> — {html.escape(tr(f'removal.desc.{removal.value}'))}</p>"
         )
         if verdict.level is safety.Level.BLOCKED:
             parts.append(f"<p style='color:{p.danger_text}'>{html.escape(tr('pkg.blocked.body'))}</p>")
@@ -507,7 +560,7 @@ class DebloatTab(QWidget):
             self._busy = False
             kind, text = summarize(results)
             self.banner.show_message(kind, "", text, palette=self.ctx.palette)
-            self.model.set_checked({r.package for r in results if r.ok}, False)
+            self.set_checked({r.package for r in results if r.ok}, False)
             self.ctx.packages.load(view)
             self._update_buttons()
 
@@ -570,13 +623,13 @@ class DebloatTab(QWidget):
     def _fill_presets_menu(self) -> None:
         self.presets_menu.clear()
         save = self.presets_menu.addAction(tr("debloat.preset.save") + "…", self.save_preset)
-        save.setEnabled(bool(self.model.checked))
+        save.setEnabled(bool(self.checked))
         self.presets_menu.addAction(tr("debloat.preset.apply") + "…", self.pick_preset)
         self.presets_menu.addSeparator()
-        self.presets_menu.addAction(tr("debloat.preset.folder"), lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(presets_dir()))))
+        self.presets_menu.addAction(tr("debloat.preset.folder"), lambda: open_folder(presets_dir()))
 
     def save_preset(self) -> None:
-        names = sorted(self.model.checked)
+        names = sorted(self.checked)
         if not names:
             return
         name, ok = QInputDialog.getText(self, tr("debloat.preset.save"), tr("debloat.preset.name"), text=self.view.name if self.view else "")

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QSortFilterProxyModel, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -21,12 +21,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from maxondroid.core import apk
+from maxondroid.core import apk, publishers
 from maxondroid.core.manager import DeviceView
 from maxondroid.core.packages import Action, Package, PkgState, Snapshot
 from maxondroid.i18n import tr
 from maxondroid.ui import icons, theme
-from maxondroid.ui.common import Banner, Placeholder, label, refilter
+from maxondroid.ui.common import Banner, Placeholder, label, open_folder, publisher_label, refilter
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.package_support import (
     confirm,
@@ -37,7 +37,7 @@ from maxondroid.ui.package_support import (
     summarize,
 )
 
-COLUMNS = ("package", "version", "type", "state", "description")
+COLUMNS = ("package", "publisher", "version", "type", "state", "description")
 PackageRole = Qt.ItemDataRole.UserRole + 10
 
 
@@ -50,6 +50,7 @@ class AppsModel(QAbstractTableModel):
         super().__init__(parent)
         self.ctx = ctx
         self.rows: list[Package] = []
+        self.publishers: dict[str, publishers.Publisher] = {}
 
     def refresh_all(self) -> None:
         """Repaint every cell after a language or theme change (the rows themselves did not change)."""
@@ -67,10 +68,15 @@ class AppsModel(QAbstractTableModel):
             return tr(f"apps.col.{COLUMNS[section]}")
         return None
 
-    def set_rows(self, rows: list[Package]) -> None:
+    def set_rows(self, rows: list[Package], pubs: dict[str, publishers.Publisher]) -> None:
         self.beginResetModel()
         self.rows = rows
+        self.publishers = pubs
         self.endResetModel()
+
+    def publisher_name(self, pkg: Package) -> str:
+        pub = self.publishers.get(pkg.name)
+        return publisher_label(pub) if pub else ""
 
     def summary(self, pkg: Package) -> str:
         entry = self.ctx.uad.get(pkg.name) if self.ctx.uad else None
@@ -86,6 +92,8 @@ class AppsModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if column == "package":
                 return pkg.name
+            if column == "publisher":
+                return self.publisher_name(pkg)
             if column == "version":
                 return pkg.version_name or (str(pkg.version_code) if pkg.version_code else "")
             if column == "type":
@@ -110,10 +118,11 @@ class AppsFilter(QSortFilterProxyModel):
         self.text = ""
         self.kind = "all"  # all, user, system
         self.state = "installed"  # installed, enabled, disabled, removed, all
+        self.publisher = "all"  # a publisher id
         self.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
-    def update(self, text: str, kind: str, state: str) -> None:
-        self.text, self.kind, self.state = text.strip().lower(), kind, state
+    def update(self, text: str, kind: str, state: str, publisher: str = "all") -> None:
+        self.text, self.kind, self.state, self.publisher = text.strip().lower(), kind, state, publisher
         refilter(self)
 
     def filterAcceptsRow(self, row: int, parent) -> bool:  # noqa: N802
@@ -125,6 +134,10 @@ class AppsFilter(QSortFilterProxyModel):
             return False
         if self.state in ("enabled", "disabled", "removed") and pkg.state.value != self.state:
             return False
+        if self.publisher != "all":
+            pub = model.publishers.get(pkg.name)
+            if pub is None or pub.id != self.publisher:
+                return False
         if self.text and self.text not in pkg.name.lower() and self.text not in model.summary(pkg).lower():
             return False
         return True
@@ -163,7 +176,8 @@ class AppsTab(QWidget):
         self.search.textChanged.connect(self._filter)
         self.kind = QComboBox()
         self.state = QComboBox()
-        for combo in (self.kind, self.state):
+        self.publisher = QComboBox()
+        for combo in (self.kind, self.state, self.publisher):
             combo.currentIndexChanged.connect(self._filter)
         self.refresh_button = QPushButton()
         self.refresh_button.clicked.connect(self.reload)
@@ -171,11 +185,15 @@ class AppsTab(QWidget):
         self.install_button.setObjectName("Primary")
         self.install_button.clicked.connect(self.pick_files)
         top.addWidget(self.search, 1)
-        top.addWidget(self.kind)
-        top.addWidget(self.state)
         top.addWidget(self.refresh_button)
         top.addWidget(self.install_button)
         layout.addLayout(top)
+        filters = QHBoxLayout()
+        filters.setSpacing(8)
+        for combo in (self.publisher, self.kind, self.state):
+            filters.addWidget(combo)
+        filters.addStretch(1)
+        layout.addLayout(filters)
 
         self.banner = Banner("info")
         layout.addWidget(self.banner)
@@ -196,11 +214,14 @@ class AppsTab(QWidget):
         self.table.setWordWrap(False)
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        head.resizeSection(0, 300)
-        head.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        head.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        head.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        head.setStretchLastSection(True)
+        head.resizeSection(0, 270)
+        head.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        head.resizeSection(1, 170)
+        for column in (2, 3, 4):
+            head.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        head.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        head.setMinimumSectionSize(60)
+        self.table.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
@@ -244,6 +265,8 @@ class AppsTab(QWidget):
                 combo.addItem(tr(f"{prefix}.{value}"), value)
             combo.setCurrentIndex(max(0, combo.findData(current)))
             combo.blockSignals(False)
+        if self.model.rows:
+            self._fill_publishers()
         self.refresh_button.setText(tr("overview.refresh"))
         self.install_button.setText(tr("apps.install"))
         self.launch_button.setText(tr("pkg.action.launch"))
@@ -302,7 +325,12 @@ class AppsTab(QWidget):
         selected = {p.name for p in self.selected()}
         rows = list(snapshot.packages.values())
         if [p for p in self.model.rows] != rows:
-            self.model.set_rows(rows)
+            db = self.ctx.uad
+            pubs = publishers.group_packages(
+                [p.name for p in rows], {p.name: db.get(p.name) for p in rows} if db else {}, view.manufacturer
+            )
+            self.model.set_rows(rows, pubs)
+            self._fill_publishers()
             self._reselect(selected)
         self.refresh_button.setEnabled(view.key not in cache.loading and not self._busy)
         self._update_count()
@@ -317,8 +345,22 @@ class AppsTab(QWidget):
             if index.data(PackageRole).name in names:
                 selection.select(index, selection.SelectionFlag.Select | selection.SelectionFlag.Rows)
 
+    def _fill_publishers(self) -> None:
+        current = self.publisher.currentData() or "all"
+        found = {pub.id: pub for pub in self.model.publishers.values()}
+        self.publisher.blockSignals(True)
+        self.publisher.clear()
+        self.publisher.addItem(tr("apps.publisher.all"), "all")
+        for pub in sorted(found.values(), key=publishers.sort_key):
+            self.publisher.addItem(publisher_label(pub), pub.id)
+        self.publisher.setCurrentIndex(max(0, self.publisher.findData(current)))
+        self.publisher.blockSignals(False)
+        self._filter()
+
     def _filter(self, *_args) -> None:
-        self.proxy.update(self.search.text(), self.kind.currentData() or "all", self.state.currentData() or "installed")
+        self.proxy.update(
+            self.search.text(), self.kind.currentData() or "all", self.state.currentData() or "installed", self.publisher.currentData() or "all"
+        )
         self._update_count()
 
     def _update_count(self) -> None:
@@ -490,7 +532,7 @@ class AppsTab(QWidget):
             if result.ok and result.file:
                 self.banner.show_message(
                     "info", "", tr("pkg.extract.done", path=str(result.file)), tr("pkg.extract.open"),
-                    lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.file.parent))), self.ctx.palette,
+                    lambda: open_folder(result.file.parent), self.ctx.palette,
                 )
             else:
                 self.banner.show_message("error", "", tr("pkg.extract.failed", details=result.message), palette=self.ctx.palette)

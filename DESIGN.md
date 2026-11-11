@@ -191,11 +191,14 @@ A disc that carries the connection state by shape, not only by colour: solid bra
 ### Banners
 Full-width strips with a drawn warning icon, a bold title, a body and up to two actions. One action sits to the right of the text; two actions go in a row under the body so the text keeps its width. Amber for security, neutral for state guidance, danger outline for errors. An accepted risk collapses the amber banner to its title line with a "Details" action; the amber ring on the token stays.
 
-### Package tables (Apps, Debloat)
-Plain `QTableView`s on the surface colour with alternating rows, no grid, 26px rows, package names in the code face. Disabled and removed packages use the muted text colour and say their state in words. The Debloat table leads with a checkbox column (14px square indicator: empty outline, or filled brass when ticked) and pairs with a details pane on the right that shows the UAD-ng description, removal level in words, and a danger-coloured line for important packages.
+### Package lists (Apps, Debloat)
+Apps is a plain `QTableView` on the surface colour with alternating rows, no grid, 26px rows, package names in the code face, and a Publisher column. Debloat is a tree grouped by publisher: a bold group row ("Google · 3") with a tri-state checkbox that ticks everything shown under it, then package rows with a checkbox (14px square: empty outline, filled brass when ticked), the removal risk and the state. Disabled and removed packages use the muted text colour and say their state in words. A details pane on the right shows the publisher, "Removal risk N of 4" with its plain meaning, a danger-coloured line for important packages, and the UAD-ng description.
+
+### Removal risk
+A 1–4 scale, always written as the number plus words ("1 · no side effects", "4 · may not boot"); never "Recommended", which reads as advice to remove. Risk 3 uses brass ink, risk 4 the danger colour, unknown risk ("?") the muted colour.
 
 ### Filter toggles
-Checkable tool buttons for the UAD-ng removal levels: surface background and muted text when off, selection colour with a brass-ink border when on. The state is carried by fill and border, and every level keeps its word label.
+Checkable tool buttons for the risk levels 1–4: surface background and muted text when off, selection colour with a brass-ink border when on. The state is carried by fill and border; the tooltip spells out the level.
 
 ## Do's and Don'ts
 

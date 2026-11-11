@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
         self.apps.apply_palette()
         self.debloat.apply_palette()
         self.apps.model.refresh_all()
-        self.debloat.model.refresh_all()
+        self.debloat.refresh_texts()
         if self._connect_dialog is not None:
             self._connect_dialog.retranslate()  # re-tints its icons
         self._render_adb_banner()
