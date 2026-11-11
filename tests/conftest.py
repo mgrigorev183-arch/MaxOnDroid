@@ -27,7 +27,13 @@ class FakeAdb:
     def calls(self):
         if not self.log.exists():
             return []
-        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+        calls = []
+        for line in self.log.read_text(encoding="utf-8").splitlines():
+            try:
+                calls.append(json.loads(line))
+            except ValueError:
+                continue  # a fake adb process is still writing this line (tests poll while it runs)
+        return calls
 
 
 @pytest.fixture(autouse=True)
