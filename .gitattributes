@@ -1,0 +1,2 @@
+# The bundled UAD-ng list is verified by its SHA-256: keep its bytes exactly as published.
+maxondroid/data/uad/uad_lists.json -text
