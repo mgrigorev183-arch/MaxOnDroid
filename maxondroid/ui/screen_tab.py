@@ -73,7 +73,7 @@ class ScreenTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)  # scroll, never cut off
         page = QWidget()
         scroll.setWidget(page)
         layout = QVBoxLayout(page)
@@ -133,6 +133,7 @@ class ScreenTab(QWidget):
         form.setContentsMargins(4, 0, 0, 0)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(8)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.size = QComboBox()
         self.bit_rate = QSpinBox()
         self.bit_rate.setRange(1, screen.MAX_BIT_RATE)
@@ -155,9 +156,10 @@ class ScreenTab(QWidget):
         form.addRow(self.form_labels[2], self.fps)
         for box in (self.audio, self.turn_off, self.on_top, self.stay_awake, self.view_only):
             form.addRow(label(""), box)
+        # the button sits under the option, not beside it: side by side they made the tab wider
+        # than a half-screen window and the right edge was cut off
+        form.addRow(label(""), self.keyboard_uhid)
         keyboard_row = QHBoxLayout()
-        keyboard_row.setSpacing(8)
-        keyboard_row.addWidget(self.keyboard_uhid)
         keyboard_row.addWidget(self.keyboard_settings)
         keyboard_row.addStretch(1)
         form.addRow(label(""), keyboard_row)
@@ -172,6 +174,7 @@ class ScreenTab(QWidget):
         self._restart_timer.setInterval(RESTART_DELAY_MS)  # spin boxes change on every click: wait for the last one
         self._restart_timer.timeout.connect(self._restart_mirror)
         self._restarting: str | None = None
+        self._finishing: set[str] = set()  # recordings being closed: scrcpy is writing the end of the file
         self.advanced.hide()
         mirror.addWidget(self.advanced)
         layout.addWidget(self.mirror_card)
@@ -191,22 +194,26 @@ class ScreenTab(QWidget):
         self.shot_button.clicked.connect(self.take_screenshot)
         self.record_button = QPushButton()
         self.record_button.clicked.connect(self.toggle_recording)
+        self.record_format = QComboBox()
+        self.record_format.currentIndexChanged.connect(self._save_format)
         row.addWidget(self.shot_button)
         row.addWidget(self.record_button)
+        row.addWidget(self.record_format)
         row.addStretch(1)
         cap.addLayout(row)
         self.capture_state = label("", role="muted", wrap=True, selectable=True)
         cap.addWidget(self.capture_state)
+        self.folder_label = label("", role="muted", wrap=True, selectable=True)
+        cap.addWidget(self.folder_label)
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
-        self.folder_label = label("", role="muted", wrap=True, selectable=True)
         self.folder_change = QPushButton()
         self.folder_change.clicked.connect(self.pick_folder)
         self.folder_open = QPushButton()
         self.folder_open.clicked.connect(lambda: open_folder(self.capture_dir(), self))
-        folder_row.addWidget(self.folder_label, 1)
         folder_row.addWidget(self.folder_change)
         folder_row.addWidget(self.folder_open)
+        folder_row.addStretch(1)
         cap.addLayout(folder_row)
         preview_row = QHBoxLayout()
         preview_row.setSpacing(12)
@@ -452,6 +459,14 @@ class ScreenTab(QWidget):
         self.tv_hint.setText(tr("screen.tv_hint"))
         self.capture_title.setText(tr("screen.capture.title"))
         self.shot_button.setText(tr("screen.screenshot"))
+        current = self.record_format.currentData() or self.ctx.settings.settings.capture_format
+        self.record_format.blockSignals(True)
+        self.record_format.clear()
+        self.record_format.addItem(tr("screen.format.mp4"), "mp4")
+        self.record_format.addItem(tr("screen.format.mkv"), "mkv")
+        self.record_format.setCurrentIndex(max(0, self.record_format.findData(current)))
+        self.record_format.blockSignals(False)
+        self.record_format.setToolTip(tr("screen.format.tip"))
         self.folder_change.setText(tr("screen.folder.change"))
         self.folder_open.setText(tr("screen.folder.open"))
         self.copy_button.setText(tr("screen.copy"))
@@ -554,11 +569,18 @@ class ScreenTab(QWidget):
         self.record_button.setText(tr("screen.record.stop") if rec_running else tr("screen.record.start"))
         self.record_button.setEnabled(ready or rec_running)
         self.shot_button.setEnabled(not self._busy_shot)
-        if rec_running:
+        rec_key = _rec_key(view.key)
+        self.record_format.setEnabled(not rec_running)
+        if rec_running and rec_key in self._finishing:
+            self.record_button.setEnabled(False)
+            _say(self.capture_state, tr("screen.record.finishing"))
+        elif rec_running:
             _say(self.capture_state, tr("screen.record.running", elapsed=_elapsed(recording.started), path=str(recording.record)))
-        elif recording is not None and recording.record and not recording.reported:
+        elif recording is not None and recording.record and not recording.reported and rec_key not in self._finishing:
             recording.reported = True
-            if recording.record.exists():
+            if recording.record.exists() and recording.graceful is False and recording.record.suffix.lower() == ".mp4":
+                _say(self.capture_state, tr("screen.record.saved_forced", path=str(recording.record)))
+            elif recording.record.exists():
                 _say(self.capture_state, tr("screen.record.saved", path=str(recording.record)))
             else:
                 _say(self.capture_state, tr("screen.record.failed", output=recording.tail() or "—"))
@@ -585,7 +607,23 @@ class ScreenTab(QWidget):
             return
         if key == (self.view.key if self.view else None):
             self._restart_timer.stop()
-        self.ctx.tasks.submit(lambda: tool.stop(key), lambda _r: self._update_state(), lambda _e: self._update_state())
+        self._finishing.add(key)
+        self._update_state()
+
+        def finished(*_args) -> None:
+            self._finishing.discard(key)
+            self._update_state()
+
+        self.ctx.tasks.submit(lambda: tool.stop(key), finished, finished)
+
+    def _save_format(self, *_args) -> None:
+        value = self.record_format.currentData()
+        if value in ("mp4", "mkv") and value != self.ctx.settings.settings.capture_format:
+            self.ctx.settings.settings.capture_format = value
+            try:
+                self.ctx.settings.save()
+            except OSError:
+                pass
 
     def toggle_recording(self) -> None:
         view = self.view
@@ -598,7 +636,7 @@ class ScreenTab(QWidget):
             return
         if not self._ready():
             return
-        target = self.capture_dir() / screen.capture_name(view.name, tr("screen.record.word"), "mkv")
+        target = self.capture_dir() / screen.capture_name(view.name, tr("screen.record.word"), self.ctx.settings.settings.capture_format)
         try:
             tool.start(_rec_key(view.key), view.serial, self.options(), self._title() + " — " + tr("screen.record.word"), record=target)
         except (ScrcpyError, OSError, ValueError) as exc:

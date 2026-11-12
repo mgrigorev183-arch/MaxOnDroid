@@ -41,6 +41,7 @@ class Settings:
     # last used ones, the starting point for a device opened for the first time
     screen_devices: dict = field(default_factory=dict)
     capture_dir: str = ""  # empty: Pictures\MaxOnDroid
+    capture_format: str = "mp4"  # mp4 opens anywhere; mkv survives scrcpy being killed
 
     def normalized(self) -> Settings:
         if self.language not in LANGUAGES:
@@ -53,6 +54,8 @@ class Settings:
         self.screen_max_size = min(max(0, self.screen_max_size), 8192)
         self.screen_bit_rate = min(max(1, self.screen_bit_rate), MAX_BIT_RATE)
         self.screen_max_fps = min(max(0, self.screen_max_fps), 240)
+        if self.capture_format not in ("mp4", "mkv"):
+            self.capture_format = "mp4"
         if self.screen_keyboard not in KEYBOARDS:
             self.screen_keyboard = "sdk"
         devices = {}

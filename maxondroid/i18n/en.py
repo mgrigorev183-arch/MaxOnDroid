@@ -595,4 +595,9 @@ STRINGS = {
     "screen.keyboard.failed": "Could not open the settings: {output}",
     "screen.bit_rate.hint": "Rough guide: USB 8–16, 5 GHz Wi-Fi 4–8, 2.4 GHz Wi-Fi 2–4. More than {max} does not help. If the picture lags, lower the size first.",
     "screen.tv_hint": "TVs rarely have the power to encode their own 4K screen, so the picture lags even over a cable. That is why a TV starts on the Speed preset. For a sharper picture try a size up to 1920 and 30 fps.",
+    "screen.format.mp4": "MP4",
+    "screen.format.mkv": "MKV",
+    "screen.format.tip": "MP4 opens in any player, including the one built into Windows. MKV survives scrcpy crashing, but the Windows player may not open it.",
+    "screen.record.finishing": "Finishing the recording: scrcpy is writing the file…",
+    "screen.record.saved_forced": "Recording saved: {path}. scrcpy did not close by itself and had to be stopped, so the MP4 file may not open. If so, choose MKV.",
 }

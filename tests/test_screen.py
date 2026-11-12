@@ -179,3 +179,48 @@ def test_restart_reopens_with_new_options(scrcpy):
     assert wait_for(lambda: len(starts(scrcpy)) == 2)
     assert "--max-size=1024" in starts(scrcpy)[1]["argv"]
     assert "--max-size=1024" not in starts(scrcpy)[0]["argv"]
+
+
+def test_mp4_recording_uses_aac_audio():
+    assert "--audio-codec=aac" in screen.build_args(SERIAL, ScrcpyOptions(), "t", Path("a.mp4"))
+    assert "--audio-codec=aac" not in screen.build_args(SERIAL, ScrcpyOptions(), "t", Path("a.mkv"))
+    assert "--audio-codec=aac" not in screen.build_args(SERIAL, ScrcpyOptions(audio=False), "t", Path("a.mp4"))
+
+
+@pytest.fixture
+def windowed(monkeypatch):
+    """On Windows the fake opens a real window, so stop() is tested with WM_CLOSE like scrcpy's SDL window."""
+    monkeypatch.setenv("FAKE_SCRCPY_WINDOW", "1")
+
+
+def test_recording_is_closed_properly_so_the_file_is_complete(scrcpy, tmp_path, windowed):
+    target = tmp_path / "rec.mp4"
+    session = scrcpy.start("rec:tv", SERIAL, ScrcpyOptions(), "t", record=target)
+    assert wait_for(lambda: target.exists() and target.read_bytes().startswith(b"FAKEREC"))
+    time.sleep(1.5 if sys.platform == "win32" else 0.3)  # the window has to exist before it can be closed
+    scrcpy.stop("rec:tv")
+    assert not session.running
+    assert session.graceful is True
+    assert target.read_bytes().endswith(b"END\n")
+
+
+def test_control_killing_scrcpy_leaves_the_file_unfinished(scrcpy, tmp_path):
+    """Positive control for the test above: a hard kill (the old stop) does not finish the file."""
+    target = tmp_path / "rec.mp4"
+    session = scrcpy.start("rec:tv", SERIAL, ScrcpyOptions(), "t", record=target)
+    assert wait_for(lambda: target.exists())
+    session.proc.kill()
+    session.proc.wait(5)
+    assert not target.read_bytes().endswith(b"END\n")
+
+
+def test_scrcpy_that_ignores_the_request_is_stopped_anyway(scrcpy, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SCRCPY_STUBBORN", "1")
+    monkeypatch.setattr(screen, "GRACEFUL_STOP", 0.5)
+    session = scrcpy.start("rec:tv", SERIAL, ScrcpyOptions(), "t", record=tmp_path / "rec.mp4")
+    assert wait_for(lambda: (tmp_path / "rec.mp4").exists())
+    time.sleep(0.3)
+    started = time.monotonic()
+    scrcpy.stop("rec:tv")
+    assert not session.running and session.graceful is False
+    assert time.monotonic() - started < 8

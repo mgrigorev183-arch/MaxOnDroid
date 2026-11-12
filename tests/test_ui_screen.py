@@ -162,3 +162,44 @@ def test_the_manager_keeps_serials_of_open_windows(win, qtbot):
     select(win, qtbot, PHONE)
     win.screen.open_button.click()
     qtbot.waitUntil(lambda: PHONE in win.screen.serials_in_use(), timeout=10000)
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+def test_screen_tab_fits_a_half_screen_window(win, qtbot, language):
+    """The report: in a window half the screen wide the right edge of the Screen tab was cut off."""
+    win._set_language(language)
+    select(win, qtbot, PHONE)
+    win.resize(960, 1000)
+    qtbot.wait(200)
+    scroll = win.screen.stack.widget(1)
+    page = scroll.widget()
+    assert win.screen.advanced.isVisible()
+    assert page.minimumSizeHint().width() <= scroll.viewport().width(), (page.minimumSizeHint().width(), scroll.viewport().width())
+    for button in (win.screen.keyboard_settings, win.screen.folder_open, win.screen.folder_change, win.screen.record_format):
+        right = button.mapTo(scroll.viewport(), button.rect().topRight()).x()
+        assert right <= scroll.viewport().width(), (button.text() if hasattr(button, "text") else button, right)
+
+
+def test_recording_is_mp4_by_default_and_finished_properly(win, qtbot, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SCRCPY_WINDOW", "1")  # on Windows: a real window to close, like scrcpy's
+    select(win, qtbot, PHONE)
+    tab = win.screen
+    assert tab.record_format.currentData() == "mp4"
+    tab.record_button.click()
+    qtbot.waitUntil(lambda: len(starts(win)) == 1, timeout=10000)
+    argv = starts(win)[0]
+    record = next(a.split("=", 1)[1] for a in argv if a.startswith("--record="))
+    assert record.endswith(".mp4") and "--audio-codec=aac" in argv
+    assert not tab.record_format.isEnabled()  # the format cannot change mid-recording
+    qtbot.wait(1500 if sys.platform == "win32" else 300)  # the window has to exist before it can be closed
+    tab.record_button.click()
+    qtbot.waitUntil(lambda: "сохранена" in tab.capture_state.text(), timeout=20000)
+    assert "принудительно" not in tab.capture_state.text() and "пришлось" not in tab.capture_state.text()
+    assert Path(record).read_bytes().endswith(b"END\n")
+    tab.record_format.setCurrentIndex(tab.record_format.findData("mkv"))
+    assert win.ctx.settings.settings.capture_format == "mkv"
+    tab.record_button.click()
+    qtbot.waitUntil(lambda: len(starts(win)) == 2, timeout=10000)
+    assert any(a.startswith("--record=") and a.endswith(".mkv") for a in starts(win)[1])
+    tab.record_button.click()
+    qtbot.waitUntil(lambda: not win.tool.get("rec:" + PHONE).running, timeout=20000)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -149,6 +150,9 @@ def build_args(serial: str, options: ScrcpyOptions, title: str, record: Path | N
     if print_fps:
         args.append("--print-fps")
     if record is not None:
+        if record.suffix.lower() == ".mp4" and options.audio:
+            # Windows' own player cannot play Opus, scrcpy's default audio codec, in MP4
+            args.append("--audio-codec=aac")
         args.append(f"--record={record}")
     for arg in args:
         if "\x00" in arg or "\n" in arg:
@@ -177,6 +181,7 @@ class Session:
         self.output: deque[str] = deque(maxlen=60)
         self.reported = False  # the UI has told the user how this session ended
         self._fps: tuple[int, int, float] | None = None  # frames, skipped, when
+        self.graceful: bool | None = None  # after stop(): True if scrcpy closed itself, False if it had to be killed
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
 
@@ -214,8 +219,23 @@ class Session:
         return "\n".join(list(self.output)[-lines:])
 
     def stop(self, timeout: float = 5.0) -> None:
+        """Close scrcpy the way a user would, so a recording is finished properly; force it if it hangs.
+
+        An MP4 file is only playable once scrcpy has written its index at the
+        end. Killing scrcpy (TerminateProcess on Windows) skips that and leaves
+        a broken file, so scrcpy is first asked to quit: its window gets
+        WM_CLOSE on Windows, SIGINT elsewhere (what Ctrl+C does).
+        """
         if not self.running:
             return
+        if _ask_to_quit(self.proc):
+            try:
+                self.proc.wait(timeout=GRACEFUL_STOP if self.record is not None else min(timeout, 3.0))
+                self.graceful = True
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        self.graceful = False
         self.proc.terminate()
         try:
             self.proc.wait(timeout=timeout)
@@ -225,6 +245,42 @@ class Session:
                 self.proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 pass  # killed; Windows reaps it later. Never block the caller for ever.
+
+
+GRACEFUL_STOP = 15.0  # seconds scrcpy gets to finish a recording file
+
+
+def _ask_to_quit(proc: subprocess.Popen) -> bool:
+    """Ask scrcpy to close itself. False if there was nothing to ask (no window yet)."""
+    if sys.platform == "win32":
+        return _post_close(proc.pid)
+    try:
+        proc.send_signal(signal.SIGINT)
+    except OSError:
+        return False
+    return True
+
+
+def _post_close(pid: int) -> bool:
+    """Send WM_CLOSE to the visible top-level windows of a process (Windows)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found: list[int] = []
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def collect(hwnd, _lparam):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(enum_proc(collect), 0)
+    for hwnd in found:
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    return bool(found)
 
 
 Listener = Callable[[str], None]

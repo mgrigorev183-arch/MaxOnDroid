@@ -193,7 +193,7 @@ def test_record_and_screenshot(win, qtbot, tmp_path):
     tab = win.screen
     tab.record_button.click()
     qtbot.waitUntil(lambda: tab.record_button.text() == "Остановить запись", timeout=5000)
-    qtbot.waitUntil(lambda: any(p.suffix == ".mkv" for p in (tmp_path / "captures").glob("*")), timeout=10000)
+    qtbot.waitUntil(lambda: any(p.suffix == ".mp4" for p in (tmp_path / "captures").glob("*")), timeout=10000)
     tab.record_button.click()
     qtbot.waitUntil(lambda: tab.capture_state.text().startswith("Запись сохранена"), timeout=5000)
     assert "Телевизор в зале запись" in tab.capture_state.text()
