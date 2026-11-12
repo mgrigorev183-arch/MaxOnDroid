@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from maxondroid.core.devices import State, Transport
 from maxondroid.core.info import Kind
@@ -52,6 +52,71 @@ def breakable(path: str) -> str:
     text = str(path).replace("\\", "\\\u200b").replace("/", "/\u200b")
     # very long folder names get break points too, every 24 characters
     return re.sub(r"[^\s\u200b]{24}(?=[^\s\u200b])", lambda m: m.group(0) + "\u200b", text)
+
+
+class FlowLayout(QLayout):
+    """Lays widgets out in a row and wraps to the next line when the row is too narrow.
+
+    For button rows whose text length depends on the language and the system
+    font: a plain row of buttons forces its full width on the whole tab.
+    """
+
+    def __init__(self, parent: QWidget | None = None, spacing: int = 8):
+        super().__init__(parent)
+        self._items: list = []
+        self._spacing = spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item) -> None:  # noqa: N802
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):  # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):  # noqa: N802
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self._place(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._place(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        width = sum(i.sizeHint().width() for i in self._visible()) + self._spacing * max(0, len(self._visible()) - 1)
+        height = max((i.sizeHint().height() for i in self._visible()), default=0)
+        return QSize(width, height)
+
+    def minimumSize(self) -> QSize:  # noqa: N802
+        size = QSize()
+        for item in self._visible():
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def _visible(self) -> list:
+        return [i for i in self._items if i.widget() is None or not i.widget().isHidden()]
+
+    def _place(self, rect: QRect, apply: bool) -> int:
+        x, y, line = rect.x(), rect.y(), 0
+        for item in self._visible():
+            hint = item.sizeHint()
+            if x > rect.x() and x + hint.width() > rect.right() + 1:
+                x, y, line = rect.x(), y + line + self._spacing, 0
+            if apply:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._spacing
+            line = max(line, hint.height())
+        return y + line - rect.y()
 
 
 class IconLabel(QWidget):

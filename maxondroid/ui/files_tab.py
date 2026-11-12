@@ -37,7 +37,7 @@ from maxondroid.core.files import FilesError, RemoteEntry
 from maxondroid.core.manager import DeviceView
 from maxondroid.i18n import tr
 from maxondroid.ui import icons
-from maxondroid.ui.common import Placeholder, breakable, label, open_folder
+from maxondroid.ui.common import FlowLayout, Placeholder, breakable, label, open_folder
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.package_support import confirm
 
@@ -146,8 +146,7 @@ class FilesTab(QWidget):
         nav.addWidget(self.new_folder_button)
         layout.addLayout(nav)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
+        actions = FlowLayout(spacing=8)  # wraps on narrow windows and long translations
         self.upload_button = QPushButton()
         self.upload_button.setObjectName("Primary")
         self.upload_menu = QMenu(self)
@@ -162,7 +161,6 @@ class FilesTab(QWidget):
         self.delete_button.clicked.connect(self.delete)
         for button in (self.upload_button, self.download_button, self.rename_button, self.delete_button):
             actions.addWidget(button)
-        actions.addStretch(1)
         layout.addLayout(actions)
 
         self.model = QStandardItemModel(0, 3, self)

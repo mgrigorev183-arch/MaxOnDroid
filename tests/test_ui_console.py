@@ -9,7 +9,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QInputDialog  # noqa: E402
+from PySide6.QtWidgets import QApplication, QInputDialog, QWidget  # noqa: E402
 
 from maxondroid.core import paths  # noqa: E402
 from maxondroid.core.console import ConsoleStore  # noqa: E402
@@ -171,7 +171,8 @@ def test_console_tab_fits_the_smallest_window(win, qtbot, language):
     win.resize(win.minimumWidth(), 700)
     qtbot.wait(200)
     tab = win.console
-    assert tab.minimumSizeHint().width() <= tab.width(), (tab.minimumSizeHint().width(), tab.width())
+    widest = sorted(((w.minimumSizeHint().width(), type(w).__name__, getattr(w, "text", lambda: "")()[:30]) for w in tab.findChildren(QWidget) if w.isVisible()), reverse=True)[:6]
+    assert tab.minimumSizeHint().width() <= tab.width(), (tab.minimumSizeHint().width(), tab.width(), widest)
 
 
 def test_screenshots(win, qtbot):

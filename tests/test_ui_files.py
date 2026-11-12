@@ -9,7 +9,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDropEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox, QWidget  # noqa: E402
 
 from maxondroid.core import files  # noqa: E402
 from maxondroid.core.adb import sh_quote  # noqa: E402
@@ -226,7 +226,11 @@ def test_files_tab_fits_the_smallest_window(win, qtbot, language):
     win.resize(win.minimumWidth(), 700)
     qtbot.wait(200)
     page = win.files.stack.widget(1)
-    assert page.minimumSizeHint().width() <= page.width(), (page.minimumSizeHint().width(), page.width())
+    widest = sorted(((w.minimumSizeHint().width(), type(w).__name__, getattr(w, "text", lambda: "")()[:30]) for w in page.findChildren(QWidget) if w.isVisible()), reverse=True)[:6]
+    rows = [page.layout().itemAt(i).minimumSize().width() for i in range(page.layout().count())]
+    assert page.minimumSizeHint().width() <= page.width(), (page.minimumSizeHint().width(), page.width(), widest, rows)
+    buttons = [win.files.upload_button, win.files.download_button, win.files.rename_button, win.files.delete_button]
+    assert all(b.geometry().right() <= page.width() for b in buttons)
 
 
 def test_screenshots(win, qtbot):
@@ -240,3 +244,25 @@ def test_screenshots(win, qtbot):
         select(win, "notes.txt")
         qtbot.wait(150)
         win.grab().save(str(Path(folder) / f"stage4-files-{theme}.png"))
+
+
+def test_flow_layout_wraps_buttons(qtbot):
+    from PySide6.QtWidgets import QPushButton
+
+    from maxondroid.ui.common import FlowLayout
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    flow = FlowLayout(host)
+    buttons = [QPushButton(f"Довольно длинная кнопка {i}") for i in range(4)]
+    for b in buttons:
+        flow.addWidget(b)
+    host.resize(260, flow.heightForWidth(260))
+    host.show()
+    qtbot.wait(50)
+    assert all(b.geometry().right() <= 260 for b in buttons)
+    assert len({b.geometry().top() for b in buttons}) == 4  # one per line at this width
+    assert flow.minimumSize().width() == max(b.minimumSizeHint().width() for b in buttons)
+    host.resize(2000, flow.heightForWidth(2000))
+    qtbot.wait(50)
+    assert len({b.geometry().top() for b in buttons}) == 1
