@@ -176,16 +176,32 @@ class Placeholder(QWidget):
             self.button.setText(action)
 
 
-def open_folder(path) -> bool:
-    """Open a folder in Explorer, at its real location (see paths.explorer_path)."""
+def open_folder(path, parent=None) -> bool:
+    """Open a folder in Explorer at its real location (see paths.explorer_path).
+
+    A folder that does not exist yet (no screenshot taken so far) is created
+    first; if Explorer still cannot open it the user is told so, instead of
+    the click silently doing nothing.
+    """
     from pathlib import Path
 
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices
+    from PySide6.QtWidgets import QMessageBox
 
     from maxondroid.core import paths
 
-    return QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.explorer_path(Path(path)))))
+    target = Path(path)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        QMessageBox.warning(parent, tr("folder.failed.title"), tr("folder.failed.body", path=str(target), details=str(exc)))
+        return False
+    real = paths.explorer_path(target)
+    if QDesktopServices.openUrl(QUrl.fromLocalFile(str(real))):
+        return True
+    QMessageBox.warning(parent, tr("folder.failed.title"), tr("folder.failed.body", path=str(real), details=tr("folder.failed.explorer")))
+    return False
 
 
 def publisher_label(pub) -> str:

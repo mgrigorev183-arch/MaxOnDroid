@@ -135,3 +135,105 @@ def test_settings_roundtrip_and_bad_values(tmp_path):
 def test_paths_honour_override(isolated_home):
     assert paths.config_dir() == isolated_home / "config"
     assert paths.log_dir() == isolated_home / "logs"
+
+
+A35 = "RFCX30397DJ"
+A35_MDNS = f"adb-{A35}-i2nRnr._adb-tls-connect._tcp"
+A35_PROPS = fx.PHONE_PROPS.replace("SM-G973F", "SM-A356E").replace("R58M12ABCDE", A35)
+
+
+def test_old_address_and_unknown_state_fold_into_the_phone_and_get_dropped(fake_adb, tmp_path):
+    """The report: a phone on wireless debugging showed twice, the second row "SM A356E · unknown"."""
+    from maxondroid.core.registry import NetworkAddress
+
+    registry = Registry(tmp_path / "devices.json")
+    registry.remember(A35, model="SM-A356E", network=NetworkAddress("192.168.1.23", 37159, "paired"))
+    listing = (
+        "List of devices attached\n"
+        f"{A35_MDNS} device product:a35x model:SM_A356E device:a35x transport_id:9\n"
+        "192.168.1.23:41055      detached product:a35x model:SM_A356E device:a35x transport_id:7\n"
+        "192.168.1.23:39999      offline transport_id:5\n\n"
+    )
+    fake_adb.set_rules([
+        {"args": ["devices", "-l"], "stdout": listing},
+        {"args": ["-s", A35_MDNS, "shell", "*"], "stdout": fx.identity_output(A35_PROPS, fx.FEATURES_PHONE, "MaxonTelephone")},
+        {"args": ["disconnect", "*"], "stdout": "disconnected\n"},
+    ])
+    manager = DeviceManager(fake_adb.runner, registry)
+    views = manager.refresh()
+    assert [v.key for v in views] == [A35]
+    (phone,) = views
+    assert phone.online and phone.serial == A35_MDNS and phone.name == "MaxonTelephone"
+    assert set(phone.serials) == {A35_MDNS, "192.168.1.23:41055", "192.168.1.23:39999"}
+    assert sorted(manager.prune()) == ["192.168.1.23:39999", "192.168.1.23:41055"]
+    assert ["disconnect", "192.168.1.23:41055"] in fake_adb.calls()
+    assert manager.prune() == []  # nothing left from that refresh
+
+
+def test_unknown_entry_without_a_matching_device_still_shows_its_state(fake_adb, tmp_path):
+    fake_adb.set_rules([{"args": ["devices", "-l"], "stdout": "List of devices attached\n10.0.0.9:5555 detached model:X1\n\n"}])
+    (view,) = make_manager(fake_adb, tmp_path).refresh()
+    assert view.state is State.UNKNOWN and view.state_detail == "detached"
+
+
+def test_ip_duplicate_of_an_mdns_phone_is_dropped_unless_in_use(fake_adb, tmp_path):
+    listing = (
+        "List of devices attached\n"
+        "192.168.1.23:37159      device product:a35x model:SM_A356E device:a35x transport_id:4\n"
+        f"{A35_MDNS} device product:a35x model:SM_A356E device:a35x transport_id:9\n\n"
+    )
+    identity = fx.identity_output(A35_PROPS, fx.FEATURES_PHONE)
+    fake_adb.set_rules([
+        {"args": ["devices", "-l"], "stdout": listing},
+        {"args": ["-s", "*"], "stdout": identity},
+        {"args": ["disconnect", "*"], "stdout": "disconnected\n"},
+    ])
+    manager = make_manager(fake_adb, tmp_path)
+    (phone,) = manager.refresh()
+    assert phone.serial == A35_MDNS  # the mDNS connection is the one commands use
+    assert manager.prune(in_use={"192.168.1.23:37159"}) == []  # a scrcpy window uses it: keep
+    manager.refresh()
+    assert manager.prune() == ["192.168.1.23:37159"]
+
+
+def test_failed_identity_is_not_retried_on_every_poll(fake_adb, tmp_path):
+    fake_adb.set_rules([
+        {"args": ["devices", "-l"], "stdout": "List of devices attached\n192.168.1.40:5555 device product:x model:MiTV device:x transport_id:1\n\n"},
+        {"args": ["-s", "192.168.1.40:5555", "shell", "*"], "stdout": "", "rc": 1},
+    ])
+    manager = make_manager(fake_adb, tmp_path)
+
+    def shells():
+        return len([c for c in fake_adb.calls() if "shell" in c])
+
+    manager.refresh(now=100.0)
+    assert shells() == 1
+    manager.refresh(now=103.0)
+    assert shells() == 1  # 5 s after the first failure
+    manager.refresh(now=106.0)
+    assert shells() == 2
+    manager.refresh(now=115.0)
+    assert shells() == 2  # 15 s after the second
+    manager.refresh(now=122.0)
+    assert shells() == 3
+    for now in (130.0, 140.0, 150.0):
+        manager.refresh(now=now)
+    assert shells() == 3  # then every 30 s, not every 2.5 s poll
+    manager.refresh(now=153.0)
+    assert shells() == 4
+    # the device drops and comes back: asked at once
+    fake_adb.set_rules([
+        {"args": ["devices", "-l"], "stdout": "List of devices attached\n192.168.1.40:5555 offline\n\n"},
+    ])
+    manager.refresh(now=154.0)
+    fake_adb.set_rules([
+        {"args": ["devices", "-l"], "stdout": "List of devices attached\n192.168.1.40:5555 device product:x model:MiTV device:x transport_id:1\n\n"},
+        {"args": ["-s", "192.168.1.40:5555", "shell", "*"], "stdout": "", "rc": 1},
+    ])
+    manager.refresh(now=155.0)
+    assert shells() == 5
+
+
+def test_reconnect_connect_timeout_is_short():
+    assert DeviceManager.CONNECT_TIMEOUT <= 5 and DeviceManager.IDENTITY_TIMEOUT <= 10
+    assert DeviceManager.IDENTITY_RETRY[-1] >= 30

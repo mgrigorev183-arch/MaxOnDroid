@@ -124,3 +124,58 @@ def test_find_scrcpy_next_to_adb(tmp_path):
     assert screen.find_scrcpy(None, str(tmp_path / "adb.exe")) == str(tmp_path / exe)
     assert screen.find_scrcpy(str(tmp_path / "missing.exe")) is None
     assert screen.find_scrcpy(str(tmp_path / exe)) == str(tmp_path / exe)
+
+
+def test_keyboard_fps_and_bit_rate_cap_in_arguments():
+    opts = ScrcpyOptions(keyboard="uhid", bit_rate_mbps=80)
+    args = screen.build_args(SERIAL, opts, "t", print_fps=True)
+    assert "--keyboard=uhid" in args and "--print-fps" in args
+    assert "--video-bit-rate=50M" in args  # capped
+    # view only sends no input, so no keyboard; recordings do not print fps
+    assert "--keyboard=uhid" not in screen.build_args(SERIAL, ScrcpyOptions(keyboard="uhid", view_only=True), "t")
+    assert "--print-fps" not in screen.build_args(SERIAL, ScrcpyOptions(), "t", Path("a.mkv"))
+    assert "--keyboard=uhid" not in screen.build_args(SERIAL, ScrcpyOptions(), "t")
+
+
+def test_options_from_saved_dict_are_sanitized():
+    last = ScrcpyOptions(max_size=1024, audio=False)
+    opts = ScrcpyOptions.from_dict({"bit_rate_mbps": 500, "max_fps": True, "keyboard": "evil", "preset": "speed", "junk": 1}, last)
+    assert opts.bit_rate_mbps == 50 and opts.max_fps == 0 and opts.keyboard == "sdk"
+    assert opts.preset == "speed" and opts.max_size == 1024 and opts.audio is False
+    assert ScrcpyOptions.from_dict("not a dict", last) is last
+    assert ScrcpyOptions.from_dict(opts.to_dict()) == opts
+
+
+def test_tv_starts_on_the_light_preset():
+    last = ScrcpyOptions(audio=False, max_size=0, bit_rate_mbps=12)
+    tv = screen.default_options("tv", last)
+    assert (tv.preset, tv.max_size, tv.bit_rate_mbps, tv.max_fps, tv.audio) == ("speed", 1280, 4, 30, False)
+    assert screen.default_options("phone", last) is last
+
+
+def wait_for(predicate, seconds=10):
+    deadline = time.monotonic() + seconds
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return predicate()
+
+
+def test_session_reports_fps_and_keeps_them_out_of_the_tail(scrcpy):
+    session = scrcpy.start("tv", SERIAL, ScrcpyOptions(), "t")
+    assert "--print-fps" in session.command
+    assert wait_for(lambda: session.fps is not None)
+    assert session.fps in ((59, 0), (57, 2))
+    assert "fps" not in session.tail(60)
+    assert scrcpy.running_serials() == {SERIAL}
+    scrcpy.stop("tv")
+    assert session.fps is None and scrcpy.running_serials() == set()
+
+
+def test_restart_reopens_with_new_options(scrcpy):
+    first = scrcpy.start("tv", SERIAL, ScrcpyOptions(max_size=0), "t")
+    assert wait_for(lambda: len(starts(scrcpy)) == 1)
+    second = scrcpy.restart("tv", SERIAL, ScrcpyOptions(max_size=1024), "t")
+    assert second is not first and not first.running and second.running
+    assert wait_for(lambda: len(starts(scrcpy)) == 2)
+    assert "--max-size=1024" in starts(scrcpy)[1]["argv"]
+    assert "--max-size=1024" not in starts(scrcpy)[0]["argv"]

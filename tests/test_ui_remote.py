@@ -166,9 +166,13 @@ def test_open_and_close_screen(win, qtbot):
     tool = use_fake_scrcpy(win)
     win.tabs.setCurrentWidget(win.screen)
     tab = win.screen
-    tab.preset_speed.setChecked(True)
+    assert tab.preset_speed.isChecked()  # a TV starts on the light preset
     assert tab.size.currentData() == 1280 and tab.bit_rate.value() == 4 and tab.fps.currentData() == 30
+    tab.preset_quality.setChecked(True)
+    assert win.ctx.settings.settings.screen_devices[TV_KEY]["preset"] == "quality"
+    tab.preset_speed.setChecked(True)
     assert win.ctx.settings.settings.screen_preset == "speed"
+    assert win.ctx.settings.settings.screen_devices[TV_KEY]["max_size"] == 1280
     tab.open_button.click()
     qtbot.waitUntil(lambda: bool(scrcpy_starts(win)), timeout=10000)
     argv = scrcpy_starts(win)[0]["argv"]
@@ -179,7 +183,7 @@ def test_open_and_close_screen(win, qtbot):
     note = next(e for e in win.ctx.journal.entries if "fake_scrcpy.py --serial=" in e.command)
     assert note.token == 1
     tab.close_button.click()
-    assert not tool.get(TV_KEY).running
+    qtbot.waitUntil(lambda: not tool.get(TV_KEY).running, timeout=8000)
     qtbot.waitUntil(lambda: tab.open_button.isEnabled(), timeout=5000)
 
 

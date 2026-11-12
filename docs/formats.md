@@ -60,6 +60,31 @@ Location: `%APPDATA%\MaxOnDroid\settings.json`.
 
 `language` is `system`, `ru` or `en`; `theme` is `system`, `light` or `dark`; an empty `adb_path` means "bundled adb, otherwise the one on PATH". Values of the wrong type fall back to the defaults.
 
+The Screen tab adds `scrcpy_path`, `capture_dir`, the last used options (`screen_preset`, `screen_max_size`, `screen_bit_rate` 1–50, `screen_max_fps`, `screen_audio`, `screen_turn_off`, `screen_on_top`, `screen_stay_awake`, `screen_view_only`, `screen_keyboard` `sdk` or `uhid`) and `screen_devices`, the options of each device by its key (at most 64, the oldest dropped first):
+
+```json
+"screen_devices": {
+  "28041SKV0123": {"preset": "speed", "max_size": 1280, "bit_rate_mbps": 4, "max_fps": 30, "audio": true,
+                   "turn_screen_off": false, "always_on_top": false, "stay_awake": false, "view_only": false,
+                   "keyboard": "sdk"}
+}
+```
+
+A device without an entry starts from the last used options, a TV from the Speed preset.
+
+## diag-YYYY-MM-DD.log — diagnostics
+
+Location: `%LOCALAPPDATA%\MaxOnDroid\logs\`, next to the command journal, kept 14 days, at most 2 MB a day. Plain text, one entry per event:
+
+```
+21:04:11.532 slow command 5.0 s (TIMEOUT): adb connect 192.168.1.31:41000
+21:06:02.118 window not responding for 1.4 s
+  File ".../maxondroid/ui/main_window.py", line 512, in _set_theme
+    self._apply_theme(code)
+```
+
+Commands quicker than one second are not written; command output never is.
+
 ## commands-YYYY-MM-DD.jsonl — command journal
 
 Location: `%LOCALAPPDATA%\MaxOnDroid\logs\`. One JSON object per line, one file per local day, files older than 14 days are deleted on start.

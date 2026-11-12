@@ -39,6 +39,7 @@ class TaskRunner(QObject):
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(max_threads)
         self._alive: set[_Signals] = set()
+        self._closed = False  # after shutdown, results are dropped: the widgets they would update are gone
 
     def submit(
         self,
@@ -51,11 +52,15 @@ class TaskRunner(QObject):
 
         def finished(value: Any) -> None:
             self._alive.discard(signals)
+            if self._closed:
+                return
             if on_done is not None:
                 on_done(value)
 
         def failed(exc: BaseException) -> None:
             self._alive.discard(signals)
+            if self._closed:
+                return
             if on_error is not None:
                 on_error(exc)
             else:
@@ -69,5 +74,6 @@ class TaskRunner(QObject):
         return bool(self._alive)
 
     def shutdown(self, timeout_ms: int = 3000) -> None:
+        self._closed = True
         self.pool.clear()
         self.pool.waitForDone(timeout_ms)

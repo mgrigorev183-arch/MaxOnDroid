@@ -5,13 +5,14 @@ from __future__ import annotations
 import sys
 
 import shiboken6
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QLocale, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from maxondroid import APP_ID, APP_NAME, __version__, i18n
 from maxondroid.core import paths, uad
 from maxondroid.core.changes import ChangeJournal
+from maxondroid.core.diag import Diagnostics
 from maxondroid.core.journal import Journal
 from maxondroid.core.registry import Registry
 from maxondroid.core.settings import SettingsStore
@@ -19,6 +20,7 @@ from maxondroid.ui import theme
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.main_window import MainWindow
 from maxondroid.ui.tokens import TokenStyle, paint_token
+from maxondroid.ui.watchdog import StallWatchdog
 from maxondroid.ui.workers import TaskRunner
 
 
@@ -42,6 +44,7 @@ def create_window(app: QApplication) -> MainWindow:
     journal = Journal(paths.log_dir())
     ctx = AppContext(settings=settings, registry=registry, journal=journal, tasks=TaskRunner(app))
     ctx.changes = ChangeJournal(paths.config_dir() / "changes.json")
+    ctx.diag = Diagnostics(paths.log_dir())
     try:
         ctx.uad = uad.load(paths.package_data_dir() / "uad", paths.data_dir())
     except (OSError, uad.DatabaseError):
@@ -67,6 +70,8 @@ def create_window(app: QApplication) -> MainWindow:
             i18n.remove_listener(retranslate)
 
     i18n.on_change(retranslate)
+    window.watchdog = StallWatchdog(ctx.diag, window)
+    QTimer.singleShot(0, window.watchdog.start)  # once the event loop runs: startup work is not a freeze
     window.i18n_listener = retranslate  # removed in closeEvent
     window.destroyed.connect(lambda *_: i18n.remove_listener(retranslate))
 

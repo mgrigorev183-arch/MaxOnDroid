@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+import time
+
+from PySide6.QtCore import QByteArray, QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,13 +24,15 @@ from PySide6.QtWidgets import (
 )
 
 from maxondroid import APP_NAME, __version__
+from maxondroid.core import paths
 from maxondroid.core.adb import AdbNotFoundError, AdbRunner, find_adb
 from maxondroid.core.manager import DeviceManager, DeviceView, ManagerError
 from maxondroid.core.settings import THEMES
+from maxondroid.core.watch import DeviceWatcher
 from maxondroid.i18n import tr
 from maxondroid.ui import icons, theme
 from maxondroid.ui.apps_tab import AppsTab
-from maxondroid.ui.common import Banner, label
+from maxondroid.ui.common import Banner, label, open_folder
 from maxondroid.ui.connect_dialog import ConnectDialog
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.debloat_tab import DebloatTab
@@ -40,8 +44,15 @@ from maxondroid.ui.remote_tab import RemoteTab
 from maxondroid.ui.screen_tab import ScreenTab
 from maxondroid.ui.settings_dialog import SettingsDialog
 
-POLL_MS = 2500
-RECONNECT_EVERY = 8  # polls (about 20 s)
+POLL_MS = 2500  # when adb track-devices is not running
+SLOW_POLL_MS = 10000  # track-devices reports changes at once; the poll only catches what it cannot see
+RECONNECT_EVERY_S = 20.0
+
+
+class _WatchBridge(QObject):
+    """Hands track-devices notifications from the watcher thread to the UI thread."""
+
+    changed = Signal(str)
 REPO_URL = "https://github.com/mgrigorev183-arch/MaxOnDroid"
 
 
@@ -53,7 +64,12 @@ class MainWindow(QMainWindow):
         self._apply_language = apply_language
         self.views: list[DeviceView] = []
         self._refreshing = False
-        self._poll_count = 0
+        self._refresh_pending = False
+        self._reconnecting = False
+        self._next_reconnect = 0.0
+        self.watcher: DeviceWatcher | None = None
+        self._watch_bridge = _WatchBridge(self)
+        self._watch_bridge.changed.connect(lambda _text: self.refresh_now(), Qt.ConnectionType.QueuedConnection)
         self._adb_error: str | None = None
         self._connect_dialog: ConnectDialog | None = None
         ctx.request_refresh = self.refresh_now
@@ -213,6 +229,8 @@ class MainWindow(QMainWindow):
             self.lang_actions[code] = action
         self.act_repo = QAction(self, triggered=lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
         self.act_about = QAction(self, triggered=self._about)
+        self.act_logs = QAction(self, triggered=lambda: open_folder(paths.log_dir(), self))
+        self.menu_help.addAction(self.act_logs)
         self.menu_help.addAction(self.act_repo)
         self.menu_help.addAction(self.act_about)
 
@@ -233,6 +251,7 @@ class MainWindow(QMainWindow):
         for code, action in self.lang_actions.items():
             action.setText(tr(f"settings.language.{code}"))
         self.act_repo.setText(tr("menu.repo"))
+        self.act_logs.setText(tr("menu.logs"))
         self.act_about.setText(tr("menu.about"))
         self.tabs.setTabText(0, tr("tab.overview"))
         self.tabs.setTabText(1, tr("tab.apps"))
@@ -271,7 +290,6 @@ class MainWindow(QMainWindow):
         self.remote.apply_palette()
         self.screen.apply_palette()
         self.apps.model.refresh_all()
-        self.debloat.refresh_texts()
         if self._connect_dialog is not None:
             self._connect_dialog.retranslate()  # re-tints its icons
         self._render_adb_banner()
@@ -304,6 +322,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.timer.stop()
+        if self.watcher is not None:
+            self.watcher.stop()
+        watchdog = getattr(self, "watchdog", None)
+        if watchdog is not None:
+            watchdog.stop()
         from maxondroid import i18n
 
         i18n.remove_listener(getattr(self, "i18n_listener", None))
@@ -331,6 +354,8 @@ class MainWindow(QMainWindow):
         else:
             runner = runner or AdbRunner(path)
             runner.add_listener(self.ctx.journal.record)
+            if self.ctx.diag is not None:
+                runner.add_tracer(self.ctx.diag.command)
             manager = DeviceManager(runner, self.ctx.registry)
             self.ctx.journal.token_lookup = manager.token_for_serial
             self.ctx.runner = runner
@@ -340,6 +365,7 @@ class MainWindow(QMainWindow):
         self._render_adb_banner()
         self._update_status()
         self.screen.setup_tool()
+        self._start_watcher()
         self.timer.start()
         self.refresh_now()
         self.device_list.setFocus()
@@ -354,20 +380,32 @@ class MainWindow(QMainWindow):
             self.adb_banner.hide()
 
     # -- polling --------------------------------------------------------------
+    def _start_watcher(self) -> None:
+        if self.watcher is not None:
+            self.watcher.stop()
+            self.watcher = None
+        if self.ctx.runner is not None:
+            self.watcher = DeviceWatcher(self.ctx.runner, self._watch_bridge.changed.emit)
+            self.watcher.start()
+
     def refresh_now(self) -> None:
         self._poll(force=True)
 
     def _poll(self, force: bool = False) -> None:
+        """Ask adb for the device list. Never waits for a reconnect: that runs as its own task."""
         manager = self.ctx.manager
-        if manager is None or self._refreshing:
+        if manager is None:
+            return
+        if self._refreshing:
+            self._refresh_pending = True  # a change came in while asking: ask again right after
             return
         self._refreshing = True
-        self._poll_count += 1
-        try_reconnect = self.ctx.settings.settings.auto_reconnect and (self._poll_count % RECONNECT_EVERY == 1)
+        self._refresh_pending = False
+        in_use = frozenset(self.screen.serials_in_use())
 
         def work():
             views = manager.refresh()
-            if try_reconnect and manager.reconnect(views):
+            if manager.prune(in_use):
                 views = manager.refresh()
             return views
 
@@ -382,6 +420,32 @@ class MainWindow(QMainWindow):
         self.device_list.set_views(views)
         self._render_rail()
         self._update_status()
+        self.timer.setInterval(SLOW_POLL_MS if self.watcher is not None and self.watcher.alive else POLL_MS)
+        if self._refresh_pending:
+            self._poll()
+        else:
+            self._maybe_reconnect(views)
+
+    def _maybe_reconnect(self, views: list[DeviceView]) -> None:
+        """Try saved Wi-Fi devices that are away, in the background, at most every 20 s."""
+        manager = self.ctx.manager
+        if manager is None or self._reconnecting or not self.ctx.settings.settings.auto_reconnect:
+            return
+        now = time.monotonic()
+        if now < self._next_reconnect:
+            return
+        self._next_reconnect = now + RECONNECT_EVERY_S
+        self._reconnecting = True
+
+        def done(tried) -> None:
+            self._reconnecting = False
+            if tried:
+                self.refresh_now()
+
+        def failed(_exc: BaseException) -> None:
+            self._reconnecting = False
+
+        self.ctx.tasks.submit(lambda: manager.reconnect(views), done, failed)
 
     def _refresh_failed(self, exc: BaseException) -> None:
         self._refreshing = False

@@ -96,6 +96,11 @@ def parse_devices(output: str) -> list[AdbDevice]:
                 state = State(known)
                 rest = rest[len(known) :].strip()
                 break
+        if state is State.UNKNOWN:
+            # a state this code does not know (newer adb): keep its word for the user, parse the rest
+            word, _, remainder = rest.partition(" ")
+            if not _KV.match(word):
+                detail, rest = word, remainder.strip()
         if state is State.NO_PERMISSIONS and rest.startswith("("):
             # "no permissions (user ... not in the plugdev group); see [http://...]"
             end = rest.find("]")

@@ -86,9 +86,9 @@ class SettingsDialog(QDialog):
 
         folder_row = QHBoxLayout()
         open_config = QPushButton(tr("settings.open_config"))
-        open_config.clicked.connect(lambda: open_folder(paths.config_dir()))
+        open_config.clicked.connect(lambda: open_folder(paths.config_dir(), self))
         open_logs = QPushButton(tr("settings.open_logs"))
-        open_logs.clicked.connect(lambda: open_folder(paths.log_dir()))
+        open_logs.clicked.connect(lambda: open_folder(paths.log_dir(), self))
         folder_row.addWidget(open_config)
         folder_row.addWidget(open_logs)
         folder_row.addStretch(1)

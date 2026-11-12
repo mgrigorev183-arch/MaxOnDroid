@@ -228,12 +228,15 @@ class DebloatTab(QWidget):
         self.restore_button.setText(tr("pkg.action.restore"))
         self.disable_button.setText(tr("pkg.action.disable"))
         self.remove_button.setText(tr("pkg.action.remove"))
-        self.apply_palette()
-        self.render(force=True)
+        self._apply_icons()
+        self.render(force=True)  # the one rebuild for the new texts
 
-    def apply_palette(self) -> None:
+    def _apply_icons(self) -> None:
         self.update_button.setIcon(icons.icon("refresh", self.ctx.palette.text))
         self.refresh_button.setIcon(icons.icon("refresh", self.ctx.palette.text_muted))
+
+    def apply_palette(self) -> None:
+        self._apply_icons()
         self.rebuild()
 
     def refresh_texts(self) -> None:
@@ -324,7 +327,26 @@ class DebloatTab(QWidget):
 
     # -- the tree ---------------------------------------------------------------
     def rebuild(self) -> None:
+        """Rebuild the tree now if the tab is on screen, otherwise when it is shown next.
+
+        A language or theme switch, a filter click and a package change all ask
+        for a rebuild; doing it for a hidden tab with hundreds of packages only
+        makes the window freeze.
+        """
+        if not self.isVisible():
+            self._dirty = True
+            return
+        self._rebuild_now()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if getattr(self, "_dirty", False):
+            self._rebuild_now()
+
+    def _rebuild_now(self) -> None:
         """Rebuild the grouped tree from the snapshot and the filters, keeping ticks, folds and the cursor."""
+        self._dirty = False
+        self.rebuild_count = getattr(self, "rebuild_count", 0) + 1
         snapshot = self.snapshot()
         current = self.tree.currentIndex().data(PackageRole) if hasattr(self, "tree") else None
         current_name = current[0].name if current else None
@@ -392,8 +414,14 @@ class DebloatTab(QWidget):
                 self.tree.setExpanded(index, index.data(GroupRole) not in self._collapsed)
             header = self.tree.header()
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+            metrics = self.tree.fontMetrics()
+            for column, texts in (
+                (1, [tr(f"removal.{r.value}") for r in uad.Removal] + [tr("debloat.col.risk")]),
+                (2, [state_text(st) for st in PkgState] + [tr("debloat.col.state")]),
+            ):
+                header.resizeSection(column, max(metrics.horizontalAdvance(t) for t in texts) + 28)
             header.setStretchLastSection(False)
             if current_index is not None:
                 self.tree.setCurrentIndex(current_index.index())
@@ -626,7 +654,7 @@ class DebloatTab(QWidget):
         save.setEnabled(bool(self.checked))
         self.presets_menu.addAction(tr("debloat.preset.apply") + "…", self.pick_preset)
         self.presets_menu.addSeparator()
-        self.presets_menu.addAction(tr("debloat.preset.folder"), lambda: open_folder(presets_dir()))
+        self.presets_menu.addAction(tr("debloat.preset.folder"), lambda: open_folder(presets_dir(), self))
 
     def save_preset(self) -> None:
         names = sorted(self.checked)

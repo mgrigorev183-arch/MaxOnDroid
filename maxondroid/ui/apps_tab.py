@@ -218,7 +218,9 @@ class AppsTab(QWidget):
         head.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         head.resizeSection(1, 170)
         for column in (2, 3, 4):
-            head.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+            # fixed widths from the possible texts (see _fit_columns): fitting to contents would
+            # measure every row whenever the style or language changes, seconds with 600+ packages
+            head.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
         head.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         head.setMinimumSectionSize(60)
         self.table.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -272,9 +274,23 @@ class AppsTab(QWidget):
         self.launch_button.setText(tr("pkg.action.launch"))
         self.more_button.setText(tr("overview.more"))
         self.model.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(COLUMNS) - 1)
+        self._fit_columns()
         self.model.refresh_all()
         self.apply_palette()
         self.render()
+
+    def _fit_columns(self) -> None:
+        """Size the version, type and state columns from the texts they can show, not from the rows."""
+        metrics = self.table.fontMetrics()
+        samples = {
+            2: ["10.125.4.1234-beta"],
+            3: [tr("pkg.type.system"), tr("pkg.type.user")],
+            4: [state_text(state) for state in PkgState],
+        }
+        head = self.table.horizontalHeader()
+        for column, texts in samples.items():
+            texts = [*texts, tr(f"apps.col.{COLUMNS[column]}")]
+            head.resizeSection(column, max(metrics.horizontalAdvance(t) for t in texts) + 32)
 
     def apply_palette(self) -> None:
         p = self.ctx.palette
@@ -532,7 +548,7 @@ class AppsTab(QWidget):
             if result.ok and result.file:
                 self.banner.show_message(
                     "info", "", tr("pkg.extract.done", path=str(result.file)), tr("pkg.extract.open"),
-                    lambda: open_folder(result.file.parent), self.ctx.palette,
+                    lambda: open_folder(result.file.parent, self), self.ctx.palette,
                 )
             else:
                 self.banner.show_message("error", "", tr("pkg.extract.failed", details=result.message), palette=self.ctx.palette)

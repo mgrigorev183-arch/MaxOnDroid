@@ -38,6 +38,7 @@ from maxondroid.ui.tokens import token_label
 
 SCRCPY_RELEASES = "https://github.com/Genymobile/scrcpy/releases"
 SIZES = (0, 1920, 1280, 1024, 800)
+RESTART_DELAY_MS = 700
 FPS = (0, 60, 30, 15)
 
 
@@ -114,6 +115,12 @@ class ScreenTab(QWidget):
         mirror.addLayout(row)
         self.mirror_state = label("", role="muted", wrap=True, selectable=True)
         mirror.addWidget(self.mirror_state)
+        self.apply_note = label("", role="muted", wrap=True)
+        self.apply_note.hide()
+        mirror.addWidget(self.apply_note)
+        self.tv_hint = label("", role="muted", wrap=True)
+        self.tv_hint.hide()
+        mirror.addWidget(self.tv_hint)
 
         self.advanced_toggle = QToolButton()
         self.advanced_toggle.setCheckable(True)
@@ -128,7 +135,7 @@ class ScreenTab(QWidget):
         form.setVerticalSpacing(8)
         self.size = QComboBox()
         self.bit_rate = QSpinBox()
-        self.bit_rate.setRange(1, 100)
+        self.bit_rate.setRange(1, screen.MAX_BIT_RATE)
         self.bit_rate.setSuffix(" Mbit/s")
         self.fps = QComboBox()
         self.audio = QCheckBox()
@@ -136,17 +143,35 @@ class ScreenTab(QWidget):
         self.on_top = QCheckBox()
         self.stay_awake = QCheckBox()
         self.view_only = QCheckBox()
+        self.keyboard_uhid = QCheckBox()
+        self.keyboard_settings = QPushButton()
+        self.keyboard_settings.clicked.connect(self.open_keyboard_settings)
+        self.keyboard_hint = label("", role="muted", wrap=True)
+        self.bit_rate_hint = label("", role="muted", wrap=True)
         self.form_labels = [label(), label(), label()]
         form.addRow(self.form_labels[0], self.size)
         form.addRow(self.form_labels[1], self.bit_rate)
+        form.addRow(label(""), self.bit_rate_hint)
         form.addRow(self.form_labels[2], self.fps)
         for box in (self.audio, self.turn_off, self.on_top, self.stay_awake, self.view_only):
             form.addRow(label(""), box)
+        keyboard_row = QHBoxLayout()
+        keyboard_row.setSpacing(8)
+        keyboard_row.addWidget(self.keyboard_uhid)
+        keyboard_row.addWidget(self.keyboard_settings)
+        keyboard_row.addStretch(1)
+        form.addRow(label(""), keyboard_row)
+        form.addRow(label(""), self.keyboard_hint)
         for widget in (self.size, self.fps):
             widget.currentIndexChanged.connect(self._save_options)
         self.bit_rate.valueChanged.connect(self._save_options)
-        for box in (self.audio, self.turn_off, self.on_top, self.stay_awake, self.view_only):
+        for box in (self.audio, self.turn_off, self.on_top, self.stay_awake, self.view_only, self.keyboard_uhid):
             box.toggled.connect(self._save_options)
+        self._restart_timer = QTimer(self)
+        self._restart_timer.setSingleShot(True)
+        self._restart_timer.setInterval(RESTART_DELAY_MS)  # spin boxes change on every click: wait for the last one
+        self._restart_timer.timeout.connect(self._restart_mirror)
+        self._restarting: str | None = None
         self.advanced.hide()
         mirror.addWidget(self.advanced)
         layout.addWidget(self.mirror_card)
@@ -178,7 +203,7 @@ class ScreenTab(QWidget):
         self.folder_change = QPushButton()
         self.folder_change.clicked.connect(self.pick_folder)
         self.folder_open = QPushButton()
-        self.folder_open.clicked.connect(lambda: open_folder(self.capture_dir()))
+        self.folder_open.clicked.connect(lambda: open_folder(self.capture_dir(), self))
         folder_row.addWidget(self.folder_label, 1)
         folder_row.addWidget(self.folder_change)
         folder_row.addWidget(self.folder_open)
@@ -212,7 +237,7 @@ class ScreenTab(QWidget):
         self._tick.setInterval(1000)
         self._tick.timeout.connect(self._update_state)
         self._tick.start()
-        self._load_options()
+        self._loading = False
         self.retranslate()
 
     # -- scrcpy --------------------------------------------------------------------
@@ -267,22 +292,45 @@ class ScreenTab(QWidget):
             always_on_top=self.on_top.isChecked(),
             stay_awake=self.stay_awake.isChecked(),
             view_only=self.view_only.isChecked(),
-        )
+            keyboard="uhid" if self.keyboard_uhid.isChecked() else "sdk",
+        ).normalized()
 
-    def _load_options(self) -> None:
+    def last_used_options(self) -> ScrcpyOptions:
         s = self.ctx.settings.settings
+        return ScrcpyOptions(
+            preset=s.screen_preset, max_size=s.screen_max_size, bit_rate_mbps=s.screen_bit_rate, max_fps=s.screen_max_fps,
+            audio=s.screen_audio, turn_screen_off=s.screen_turn_off, always_on_top=s.screen_on_top,
+            stay_awake=s.screen_stay_awake, view_only=s.screen_view_only, keyboard=s.screen_keyboard,
+        ).normalized()
+
+    def options_for(self, view: DeviceView | None) -> ScrcpyOptions:
+        """The options saved for this device, or a starting point for a device seen for the first time."""
+        last = self.last_used_options()
+        if view is None:
+            return last
+        saved = self.ctx.settings.settings.screen_devices.get(view.key)
+        if saved is not None:
+            return ScrcpyOptions.from_dict(saved, last)
+        return screen.default_options(view.kind.value, last)
+
+    def _show_options(self, opts: ScrcpyOptions) -> None:
         self._loading = True
-        (self.preset_speed if s.screen_preset == "speed" else self.preset_quality).setChecked(True)
-        self.bit_rate.setValue(s.screen_bit_rate)
-        self.audio.setChecked(s.screen_audio)
-        self.turn_off.setChecked(s.screen_turn_off)
-        self.on_top.setChecked(s.screen_on_top)
-        self.stay_awake.setChecked(s.screen_stay_awake)
-        self.view_only.setChecked(s.screen_view_only)
-        self._loading = False
+        try:
+            (self.preset_speed if opts.preset == "speed" else self.preset_quality).setChecked(True)
+            self.size.setCurrentIndex(max(0, self.size.findData(opts.max_size)))
+            self.bit_rate.setValue(opts.bit_rate_mbps)
+            self.fps.setCurrentIndex(max(0, self.fps.findData(opts.max_fps)))
+            self.audio.setChecked(opts.audio)
+            self.turn_off.setChecked(opts.turn_screen_off)
+            self.on_top.setChecked(opts.always_on_top)
+            self.stay_awake.setChecked(opts.stay_awake)
+            self.view_only.setChecked(opts.view_only)
+            self.keyboard_uhid.setChecked(opts.keyboard == "uhid")
+        finally:
+            self._loading = False
 
     def _apply_preset(self, preset: str) -> None:
-        if getattr(self, "_loading", False):
+        if self._loading:
             return
         opts = ScrcpyOptions.for_preset(preset, self.options())
         self._loading = True
@@ -293,17 +341,73 @@ class ScreenTab(QWidget):
         self._save_options()
 
     def _save_options(self, *_args) -> None:
-        if getattr(self, "_loading", False):
+        if self._loading:
             return
         s = self.ctx.settings.settings
         o = self.options()
         s.screen_preset, s.screen_max_size, s.screen_bit_rate, s.screen_max_fps = o.preset, o.max_size, o.bit_rate_mbps, o.max_fps
         s.screen_audio, s.screen_turn_off, s.screen_on_top = o.audio, o.turn_screen_off, o.always_on_top
-        s.screen_stay_awake, s.screen_view_only = o.stay_awake, o.view_only
+        s.screen_stay_awake, s.screen_view_only, s.screen_keyboard = o.stay_awake, o.view_only, o.keyboard
+        if self.view is not None:
+            s.screen_devices.pop(self.view.key, None)
+            s.screen_devices[self.view.key] = o.to_dict()  # most recent last: the oldest are dropped first
         try:
             self.ctx.settings.save()
         except OSError:
             pass
+        self._options_changed()
+
+    def _options_changed(self) -> None:
+        """scrcpy reads its options only at start: reopen an open window, explain it for a recording."""
+        view = self.view
+        tool = self.status_.tool
+        if view is None or tool is None:
+            return
+        mirror = tool.get(view.key)
+        if mirror is not None and mirror.running:
+            self._restart_timer.start()
+        recording = tool.get(_rec_key(view.key))
+        _say(self.apply_note, tr("screen.apply.next_recording") if recording is not None and recording.running else "")
+
+    def _restart_mirror(self) -> None:
+        view = self.view
+        tool = self.status_.tool
+        if view is None or tool is None or not view.online or self._restarting:
+            return
+        mirror = tool.get(view.key)
+        if mirror is None or not mirror.running:
+            return
+        key, serial, options, title = view.key, view.serial, self.options(), self._title()
+        self._restarting = key
+        self._update_state()
+
+        def done(_session) -> None:
+            self._restarting = None
+            self._update_state()
+
+        def failed(exc: BaseException) -> None:
+            self._restarting = None
+            self.mirror_state.setText(tr("screen.state.failed", details=str(exc)))
+
+        self.ctx.tasks.submit(lambda: tool.restart(key, serial, options, title), done, failed)
+
+    def serials_in_use(self) -> set[str]:
+        """adb serials of open scrcpy windows and recordings (the device manager must not drop them)."""
+        tool = self.status_.tool
+        return tool.running_serials() if tool is not None else set()
+
+    def open_keyboard_settings(self) -> None:
+        """Android's physical keyboard settings, where the layout for the scrcpy keyboard is chosen."""
+        view = self.view
+        runner = self.ctx.runner
+        if view is None or not view.online or runner is None:
+            return
+        serial = view.serial
+        self.ctx.tasks.submit(
+            lambda: runner.shell(serial, "am", "start", "-a", "android.settings.HARD_KEYBOARD_SETTINGS", timeout=15),
+            lambda result: _say(self.keyboard_hint, tr("screen.keyboard.hint") if result.ok else tr("screen.keyboard.failed", output=result.output or "—")),
+            lambda exc: _say(self.keyboard_hint, tr("screen.keyboard.failed", output=str(exc))),
+        )
 
     def _toggle_advanced(self, shown: bool) -> None:
         self.advanced.setVisible(shown)
@@ -321,22 +425,31 @@ class ScreenTab(QWidget):
         self.advanced_toggle.setText(tr("screen.advanced"))
         for lbl, key in zip(self.form_labels, ("size", "bit_rate", "fps"), strict=True):
             lbl.setText(tr(f"screen.option.{key}"))
+        first_time = self.size.count() == 0
         self._loading = True
         for combo, values, key in ((self.size, SIZES, "size"), (self.fps, FPS, "fps")):
             current = combo.currentData()
-            if current is None:
-                current = self.ctx.settings.settings.screen_max_size if key == "size" else self.ctx.settings.settings.screen_max_fps
             combo.clear()
             for value in values:
                 combo.addItem(tr(f"screen.{key}.any") if value == 0 else tr(f"screen.{key}.value", value=value), value)
             combo.setCurrentIndex(max(0, combo.findData(current)))
         self._loading = False
+        if first_time:
+            self._show_options(self.options_for(self.view))
         self.bit_rate.setSuffix(" " + tr("screen.mbps"))
         self.audio.setText(tr("screen.option.audio"))
         self.turn_off.setText(tr("screen.option.turn_off"))
         self.on_top.setText(tr("screen.option.on_top"))
         self.stay_awake.setText(tr("screen.option.stay_awake"))
         self.view_only.setText(tr("screen.option.view_only"))
+        self.turn_off.setToolTip(tr("screen.option.turn_off.tip"))
+        self.keyboard_uhid.setText(tr("screen.option.keyboard"))
+        self.keyboard_uhid.setToolTip(tr("screen.option.keyboard.tip"))
+        self.keyboard_settings.setText(tr("screen.keyboard.settings"))
+        self.keyboard_settings.setToolTip(tr("screen.keyboard.settings.tip"))
+        _say(self.keyboard_hint, tr("screen.keyboard.hint"))
+        self.bit_rate_hint.setText(tr("screen.bit_rate.hint", max=screen.MAX_BIT_RATE))
+        self.tv_hint.setText(tr("screen.tv_hint"))
         self.capture_title.setText(tr("screen.capture.title"))
         self.shot_button.setText(tr("screen.screenshot"))
         self.folder_change.setText(tr("screen.folder.change"))
@@ -358,8 +471,14 @@ class ScreenTab(QWidget):
 
     # -- device and state -----------------------------------------------------------
     def set_device(self, view: DeviceView | None) -> None:
-        changed = self.view is None or view is None or self.view.key != view.key or self.view.online != view.online
+        new_device = (self.view is None) != (view is None) or (view is not None and self.view is not None and self.view.key != view.key)
+        changed = new_device or (view is not None and self.view is not None and self.view.online != view.online)
         self.view = view
+        if new_device:
+            self._restart_timer.stop()
+            self._show_options(self.options_for(view))
+            _say(self.apply_note, "")
+            self.tv_hint.setVisible(view is not None and view.kind.value == "tv")
         if changed:
             _say(self.capture_state, "")
             self.render()
@@ -405,12 +524,26 @@ class ScreenTab(QWidget):
         recording = tool.get(_rec_key(view.key)) if tool else None
         ready = self._ready()
         running = bool(session and session.running)
-        self.open_button.setEnabled(ready and not running)
-        self.close_button.setEnabled(running)
+        self.open_button.setEnabled(ready and not running and self._restarting != view.key)
+        self.close_button.setEnabled(running and self._restarting != view.key)
+        version = self.status_.version
+        keyboard_ok = version is None or version[:2] >= screen.KEYBOARD_VERSION
+        self.keyboard_uhid.setEnabled(keyboard_ok and not self.view_only.isChecked())
+        self.keyboard_settings.setEnabled(True)
+        if not keyboard_ok:
+            self.keyboard_uhid.setToolTip(tr("screen.option.keyboard.too_old", version=".".join(map(str, screen.KEYBOARD_VERSION))))
         if self.status_.checking:
             self.mirror_state.setText(tr("screen.tool.checking"))
+        elif self._restarting == view.key:
+            self.mirror_state.setText(tr("screen.state.restarting"))
         elif running:
-            self.mirror_state.setText(tr("screen.state.open", elapsed=_elapsed(session.started)))
+            fps = session.fps
+            if fps is None:
+                self.mirror_state.setText(tr("screen.state.open", elapsed=_elapsed(session.started)))
+            elif fps[1]:
+                self.mirror_state.setText(tr("screen.state.open_fps_skipped", elapsed=_elapsed(session.started), fps=fps[0], skipped=fps[1]))
+            else:
+                self.mirror_state.setText(tr("screen.state.open_fps", elapsed=_elapsed(session.started), fps=fps[0]))
         elif session is not None and session.returncode not in (None, 0):
             self.mirror_state.setText(tr("screen.state.exited", code=session.returncode, output=session.tail() or "—"))
         elif self.status_.version:
@@ -446,9 +579,13 @@ class ScreenTab(QWidget):
         self._update_state()
 
     def _stop(self, key: str) -> None:
-        if self.status_.tool is not None and key:
-            self.status_.tool.stop(key)
-        self._update_state()
+        """Close a window or finish a recording in the background: scrcpy may take a moment to write the file."""
+        tool = self.status_.tool
+        if tool is None or not key:
+            return
+        if key == (self.view.key if self.view else None):
+            self._restart_timer.stop()
+        self.ctx.tasks.submit(lambda: tool.stop(key), lambda _r: self._update_state(), lambda _e: self._update_state())
 
     def toggle_recording(self) -> None:
         view = self.view

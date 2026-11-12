@@ -348,8 +348,8 @@ class InfoError(RuntimeError):
         self.result = result
 
 
-def read_identity(runner: AdbRunner, serial: str, log: bool = False) -> Identity:
-    result = runner.shell_script(serial, IDENTITY_SCRIPT, timeout=20, log=log)
+def read_identity(runner: AdbRunner, serial: str, log: bool = False, timeout: float = 20) -> Identity:
+    result = runner.shell_script(serial, IDENTITY_SCRIPT, timeout=timeout, log=log)
     if not result.ok or "@@end" not in result.stdout:
         raise InfoError(result)
     return parse_identity(split_sections(result.stdout))

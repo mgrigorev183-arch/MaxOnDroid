@@ -21,6 +21,8 @@ def device_subtitle(view: DeviceView) -> str:
     parts = [kind_name(view.kind)]
     if view.state is State.ONLINE:
         parts.append(transport_name(view.transport))
+    elif view.state is State.UNKNOWN and view.state_detail:
+        parts.append(f"{state_name(view.state)} ({view.state_detail})")
     else:
         parts.append(state_name(view.state))
     return " · ".join(p for p in parts if p)

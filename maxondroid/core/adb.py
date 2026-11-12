@@ -28,6 +28,9 @@ from maxondroid.core.paths import bundled_tools_dir
 
 #: How long an ordinary adb call may take before it is killed.
 DEFAULT_TIMEOUT = 30.0
+#: After killing a timed-out adb, how long to wait for its output pipes. Another
+#: process (an adb server it started) can keep them open for ever on Windows.
+AFTER_KILL_WAIT = 3.0
 
 _CREATE_NO_WINDOW = 0x08000000  # keep Windows from flashing a console window
 
@@ -129,6 +132,7 @@ class AdbRunner:
             raise ValueError("adb command must not be empty")
         self.default_timeout = default_timeout
         self._listeners: list[Listener] = []
+        self._tracers: list[Listener] = []
         self._lock = threading.Lock()
 
     @property
@@ -143,6 +147,33 @@ class AdbRunner:
         with self._lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)
+
+    def add_tracer(self, tracer: Listener) -> None:
+        """Called after every command, including the quiet ones the journal skips (diagnostics)."""
+        with self._lock:
+            self._tracers.append(tracer)
+
+    def _popen_kwargs(self) -> dict:
+        kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE, "shell": False}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = _CREATE_NO_WINDOW
+        env = dict(os.environ)
+        env.setdefault("ADB_MDNS_AUTO_CONNECT", "adb-tls-connect")
+        kwargs["env"] = env
+        return kwargs
+
+    def open_stream(self, args: Sequence[str]) -> subprocess.Popen:
+        """Start a long-running adb command (``track-devices``) whose stdout is read as it comes.
+
+        The caller owns the process and must kill it. stderr is discarded.
+        """
+        kwargs = self._popen_kwargs()
+        kwargs["stderr"] = subprocess.DEVNULL
+        command = self._command + _check_args(args)
+        try:
+            return subprocess.Popen(command, **kwargs)
+        except OSError as exc:
+            raise AdbNotFoundError(str(exc)) from exc
 
     def run(
         self,
@@ -166,17 +197,8 @@ class AdbRunner:
             _check_args([serial])
         full = self._command + argv
         limit = self.default_timeout if timeout is None else timeout
-        kwargs: dict = {
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "shell": False,
-        }
-        if sys.platform == "win32":
-            kwargs["creationflags"] = _CREATE_NO_WINDOW
-        env = dict(os.environ)
-        env.setdefault("ADB_MDNS_AUTO_CONNECT", "adb-tls-connect")
-        kwargs["env"] = env
+        kwargs = self._popen_kwargs()
+        kwargs["stderr"] = subprocess.PIPE
 
         started = time.monotonic()
         timed_out = False
@@ -189,7 +211,17 @@ class AdbRunner:
         except subprocess.TimeoutExpired:
             timed_out = True
             proc.kill()
-            out_b, err_b = proc.communicate()
+            try:
+                out_b, err_b = proc.communicate(timeout=AFTER_KILL_WAIT)
+            except subprocess.TimeoutExpired:
+                # adb is dead but something it started still holds the pipes: give up on the output.
+                # The pipes are not closed here: on Windows a reader thread may be blocked in them,
+                # and closing would wait for that thread. They go when the other process exits.
+                out_b, err_b = b"", b"(no output: the pipes are still held by another process)"
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
         duration = time.monotonic() - started
         data = out_b or b""
         result = AdbResult(
@@ -202,9 +234,15 @@ class AdbRunner:
             serial=serial,
             secrets=tuple(s for s in secrets if s),
         )
-        if log:
-            with self._lock:
-                listeners = list(self._listeners)
+        with self._lock:
+            tracers = list(self._tracers)
+            listeners = list(self._listeners) if log else []
+        for tracer in tracers:
+            try:
+                tracer(result)
+            except Exception:
+                pass
+        if listeners:
             for listener in listeners:
                 try:
                     listener(result)

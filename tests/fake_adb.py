@@ -10,7 +10,10 @@ pointing at a JSON file::
     ]}
 
 ``*`` as the last element matches any remaining arguments. ``stdout_b64``
-returns binary output (screenshots). ``responses`` are
+returns binary output (screenshots). ``stream`` is a list of ``{"data", "sleep"}``
+chunks written one by one with a flush (``track-devices``). ``holder`` starts a
+child process that inherits stdout and sleeps that many seconds, like an adb
+server that keeps the client's pipes open. ``responses`` are
 returned one per call (the last one repeats). Every call is appended to
 ``FAKE_ADB_LOG`` as one JSON array per line so tests can check the exact argv.
 Unknown commands exit 1 with "fake adb: no rule".
@@ -47,6 +50,18 @@ def main(argv):
             counter.write_text(str(count + 1))
             responses = rule["responses"]
             response = responses[min(count, len(responses) - 1)]
+        if response.get("holder"):
+            import subprocess
+
+            # explicit std handles: on Windows only these are inherited, so the child really holds the pipes
+            subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({float(response['holder'])})"], stdout=sys.stdout, stderr=sys.stderr)
+        if "stream" in response:
+            for chunk in response["stream"]:
+                sys.stdout.buffer.write(chunk.get("data", "").encode("utf-8"))
+                sys.stdout.buffer.flush()
+                if chunk.get("sleep"):
+                    time.sleep(chunk["sleep"])
+            return int(response.get("rc", 0))
         if response.get("sleep"):
             time.sleep(response["sleep"])
         if "stdout_b64" in response:

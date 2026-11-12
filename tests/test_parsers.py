@@ -99,3 +99,13 @@ def test_placeholder_serial_is_ignored():
 def test_scripts_are_single_line_constants():
     for script in (info.INFO_SCRIPT, info.IDENTITY_SCRIPT):
         assert "\n" not in script and script.endswith("echo @@end")
+
+
+def test_unknown_state_keeps_its_word_and_the_model():
+    from maxondroid.core.devices import State, parse_devices
+
+    text = "List of devices attached\n192.168.1.23:41055      detached product:a35x model:SM_A356E device:a35x transport_id:7\n\n"
+    (device,) = parse_devices(text)
+    assert device.state is State.UNKNOWN
+    assert device.state_detail == "detached"
+    assert device.model == "SM A356E" and device.transport_id == "7"

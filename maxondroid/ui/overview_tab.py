@@ -369,6 +369,8 @@ class OverviewTab(QWidget):
             self.state_banner.show_message("info", tr("overview.no_permissions.title"), view.state_detail, palette=p)
         elif view.state is State.OFFLINE:
             self.state_banner.show_message("info", tr("overview.offline.title"), tr("overview.offline.body"), palette=p)
+        elif view.state is State.UNKNOWN:
+            self.state_banner.show_message("info", tr("overview.unknown.title"), tr("overview.unknown.body", state=view.state_detail or "?"), palette=p)
         elif view.state is State.DISCONNECTED:
             if view.network:
                 body = tr("overview.disconnected.body_network", address=f"{view.network.host}:{view.network.port}")

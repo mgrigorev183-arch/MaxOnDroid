@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from maxondroid.core.jsonstore import read_json, write_json_atomic
+from maxondroid.core.screen import KEYBOARDS, MAX_BIT_RATE, ScrcpyOptions
 
 FORMAT = "maxondroid.settings"
+MAX_SCREEN_DEVICES = 64
 VERSION = 1
 
 LANGUAGES = ("system", "ru", "en")
@@ -34,6 +36,10 @@ class Settings:
     screen_on_top: bool = False
     screen_stay_awake: bool = False
     screen_view_only: bool = False
+    screen_keyboard: str = "sdk"
+    # options per device key (core.screen.ScrcpyOptions as a dict); the fields above are the
+    # last used ones, the starting point for a device opened for the first time
+    screen_devices: dict = field(default_factory=dict)
     capture_dir: str = ""  # empty: Pictures\MaxOnDroid
 
     def normalized(self) -> Settings:
@@ -45,8 +51,15 @@ class Settings:
         if self.screen_preset not in ("quality", "speed"):
             self.screen_preset = "quality"
         self.screen_max_size = min(max(0, self.screen_max_size), 8192)
-        self.screen_bit_rate = min(max(1, self.screen_bit_rate), 100)
+        self.screen_bit_rate = min(max(1, self.screen_bit_rate), MAX_BIT_RATE)
         self.screen_max_fps = min(max(0, self.screen_max_fps), 240)
+        if self.screen_keyboard not in KEYBOARDS:
+            self.screen_keyboard = "sdk"
+        devices = {}
+        for key, value in list(self.screen_devices.items())[-MAX_SCREEN_DEVICES:]:
+            if isinstance(key, str) and key and isinstance(value, dict):
+                devices[key] = ScrcpyOptions.from_dict(value).to_dict()
+        self.screen_devices = devices
         return self
 
 
