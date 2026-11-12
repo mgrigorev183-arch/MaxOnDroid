@@ -257,10 +257,11 @@ def test_flow_layout_wraps_buttons(qtbot):
     buttons = [QPushButton(f"Довольно длинная кнопка {i}") for i in range(4)]
     for b in buttons:
         flow.addWidget(b)
-    host.resize(260, flow.heightForWidth(260))
+    narrow = max(b.sizeHint().width() for b in buttons) + 10  # room for one button per line, on any font
+    host.resize(narrow, flow.heightForWidth(narrow))
     host.show()
     qtbot.wait(50)
-    assert all(b.geometry().right() <= 260 for b in buttons)
+    assert all(b.geometry().right() < narrow for b in buttons), [(b.geometry().right(), narrow) for b in buttons]
     assert len({b.geometry().top() for b in buttons}) == 4  # one per line at this width
     assert flow.minimumSize().width() == max(b.minimumSizeHint().width() for b in buttons)
     host.resize(2000, flow.heightForWidth(2000))
