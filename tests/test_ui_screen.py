@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from maxondroid.core.screen import Scrcpy  # noqa: E402
 from maxondroid.ui.app import create_window  # noqa: E402
@@ -165,16 +165,23 @@ def test_the_manager_keeps_serials_of_open_windows(win, qtbot):
 
 
 @pytest.mark.parametrize("language", ["ru", "en"])
-def test_screen_tab_fits_a_half_screen_window(win, qtbot, language):
+def test_screen_tab_fits_a_half_screen_window(win, qtbot, language, tmp_path):
     """The report: in a window half the screen wide the right edge of the Screen tab was cut off."""
     win._set_language(language)
+    # a long path without spaces, like a temp folder on Windows: a label cannot wrap it at spaces
+    win.ctx.settings.settings.capture_dir = str(tmp_path / ("very_long_folder_name_without_any_spaces_" * 3) / "captures")
+    win.screen.retranslate()
     select(win, qtbot, PHONE)
     win.resize(960, 1000)
     qtbot.wait(200)
     scroll = win.screen.stack.widget(1)
     page = scroll.widget()
     assert win.screen.advanced.isVisible()
-    assert page.minimumSizeHint().width() <= scroll.viewport().width(), (page.minimumSizeHint().width(), scroll.viewport().width())
+    widest = sorted(
+        ((w.minimumSizeHint().width(), type(w).__name__, getattr(w, "text", lambda: "")()[:40]) for w in page.findChildren(QWidget) if w.isVisible()),
+        reverse=True,
+    )[:8]
+    assert page.minimumSizeHint().width() <= scroll.viewport().width(), (page.minimumSizeHint().width(), scroll.viewport().width(), widest)
     for button in (win.screen.keyboard_settings, win.screen.folder_open, win.screen.folder_change, win.screen.record_format):
         right = button.mapTo(scroll.viewport(), button.rect().topRight()).x()
         assert right <= scroll.viewport().width(), (button.text() if hasattr(button, "text") else button, right)
@@ -182,6 +189,8 @@ def test_screen_tab_fits_a_half_screen_window(win, qtbot, language):
 
 def test_recording_is_mp4_by_default_and_finished_properly(win, qtbot, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_SCRCPY_WINDOW", "1")  # on Windows: a real window to close, like scrcpy's
+    ready = tmp_path / "ready.txt"
+    monkeypatch.setenv("FAKE_SCRCPY_READY", str(ready))
     select(win, qtbot, PHONE)
     tab = win.screen
     assert tab.record_format.currentData() == "mp4"
@@ -191,7 +200,7 @@ def test_recording_is_mp4_by_default_and_finished_properly(win, qtbot, tmp_path,
     record = next(a.split("=", 1)[1] for a in argv if a.startswith("--record="))
     assert record.endswith(".mp4") and "--audio-codec=aac" in argv
     assert not tab.record_format.isEnabled()  # the format cannot change mid-recording
-    qtbot.wait(1500 if sys.platform == "win32" else 300)  # the window has to exist before it can be closed
+    qtbot.waitUntil(ready.exists, timeout=20000)  # the window has to exist before it can be closed
     tab.record_button.click()
     qtbot.waitUntil(lambda: "сохранена" in tab.capture_state.text(), timeout=20000)
     assert "принудительно" not in tab.capture_state.text() and "пришлось" not in tab.capture_state.text()

@@ -31,6 +31,7 @@ DEFAULT_TIMEOUT = 30.0
 #: After killing a timed-out adb, how long to wait for its output pipes. Another
 #: process (an adb server it started) can keep them open for ever on Windows.
 AFTER_KILL_WAIT = 3.0
+CANCEL_POLL = 0.2  # how often a cancellable command checks its Cancel button
 
 _CREATE_NO_WINDOW = 0x08000000  # keep Windows from flashing a console window
 
@@ -49,11 +50,12 @@ class AdbResult:
     duration: float
     timed_out: bool = False
     serial: str | None = None
+    cancelled: bool = False  # stopped by the user (a file transfer's Cancel button)
     secrets: tuple[str, ...] = field(default=(), repr=False)
 
     @property
     def ok(self) -> bool:
-        return self.returncode == 0 and not self.timed_out
+        return self.returncode == 0 and not self.timed_out and not self.cancelled
 
     @property
     def output(self) -> str:
@@ -162,13 +164,14 @@ class AdbRunner:
         kwargs["env"] = env
         return kwargs
 
-    def open_stream(self, args: Sequence[str]) -> subprocess.Popen:
-        """Start a long-running adb command (``track-devices``) whose stdout is read as it comes.
+    def open_stream(self, args: Sequence[str], merge_stderr: bool = False) -> subprocess.Popen:
+        """Start a long-running adb command whose stdout is read as it comes.
 
-        The caller owns the process and must kill it. stderr is discarded.
+        ``track-devices`` discards stderr; the console merges it into stdout, as
+        cmd would show it. The caller owns the process and must kill it.
         """
         kwargs = self._popen_kwargs()
-        kwargs["stderr"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.STDOUT if merge_stderr else subprocess.DEVNULL
         command = self._command + _check_args(args)
         try:
             return subprocess.Popen(command, **kwargs)
@@ -183,15 +186,17 @@ class AdbRunner:
         *,
         log: bool = True,
         secrets: Sequence[str] = (),
+        cancel: threading.Event | None = None,
     ) -> AdbResult:
-        result, _ = self._run(args, serial, timeout, log, secrets, binary=False)
+        """Run adb and wait. ``cancel``: setting this event from another thread kills adb."""
+        result, _ = self._run(args, serial, timeout, log, secrets, binary=False, cancel=cancel)
         return result
 
     def run_bytes(self, args: Sequence[str], serial: str | None = None, timeout: float | None = None, *, log: bool = True) -> tuple[AdbResult, bytes]:
         """Like run, but returns stdout as raw bytes (``exec-out screencap -p``). The journal sees only its size."""
         return self._run(args, serial, timeout, log, (), binary=True)
 
-    def _run(self, args, serial, timeout, log, secrets, binary: bool) -> tuple[AdbResult, bytes]:
+    def _run(self, args, serial, timeout, log, secrets, binary: bool, cancel: threading.Event | None = None) -> tuple[AdbResult, bytes]:
         argv = (["-s", serial] if serial else []) + _check_args(args)
         if serial is not None:
             _check_args([serial])
@@ -206,10 +211,24 @@ class AdbRunner:
             proc = subprocess.Popen(full, **kwargs)
         except OSError as exc:
             raise AdbNotFoundError(str(exc)) from exc
+        cancelled = False
         try:
-            out_b, err_b = proc.communicate(timeout=limit)
+            if cancel is None:
+                out_b, err_b = proc.communicate(timeout=limit)
+            else:
+                deadline = started + limit
+                while True:
+                    try:
+                        out_b, err_b = proc.communicate(timeout=CANCEL_POLL)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if cancel.is_set():
+                            cancelled = True
+                            raise
+                        if time.monotonic() >= deadline:
+                            raise
         except subprocess.TimeoutExpired:
-            timed_out = True
+            timed_out = not cancelled
             proc.kill()
             try:
                 out_b, err_b = proc.communicate(timeout=AFTER_KILL_WAIT)
@@ -223,16 +242,19 @@ class AdbRunner:
                 except subprocess.TimeoutExpired:
                     pass
         duration = time.monotonic() - started
+        if cancelled:
+            err_b = (err_b or b"") + b"\n(cancelled by the user)"
         data = out_b or b""
         result = AdbResult(
             argv=tuple(argv),
-            returncode=proc.returncode if not timed_out else -1,
+            returncode=proc.returncode if not (timed_out or cancelled) else -1,
             stdout=f"<{len(data)} bytes>" if binary else _decode(out_b),
             stderr=_decode(err_b),
             duration=duration,
             timed_out=timed_out,
             serial=serial,
             secrets=tuple(s for s in secrets if s),
+            cancelled=cancelled,
         )
         with self._lock:
             tracers = list(self._tracers)

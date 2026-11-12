@@ -2,7 +2,8 @@
 
 FAKE_SCRCPY_MODE: "run" (default) stays open until killed (printing "N fps" lines
 with --print-fps). A recording file gets "END" only when it is closed properly:
-SIGINT, or WM_CLOSE to its window when FAKE_SCRCPY_WINDOW is set on Windows; "fail" exits at once
+SIGINT, or WM_CLOSE to its window when FAKE_SCRCPY_WINDOW is set on Windows.
+FAKE_SCRCPY_READY names a file that gets a line once the fake is ready to be closed; "fail" exits at once
 with an error like real scrcpy, "old" reports version 1.25.
 Every start is appended to FAKE_SCRCPY_LOG as {"argv": [...], "adb": $ADB}.
 """
@@ -38,6 +39,12 @@ def main(argv):
             with open(record, "ab") as handle:
                 handle.write(b"END\n")
 
+    def ready():
+        flag = os.environ.get("FAKE_SCRCPY_READY")
+        if flag:
+            with open(flag, "a", encoding="utf-8") as handle:
+                handle.write(f"{os.getpid()}\n")
+
     print("INFO: Renderer: direct3d", flush=True)
     if "--print-fps" in argv:  # like scrcpy: one line a second (faster here), sometimes with skipped frames
         def fps():
@@ -58,8 +65,11 @@ def main(argv):
             root.destroy()
 
         root.protocol("WM_DELETE_WINDOW", close)
+        root.update()  # the window exists now
+        ready()
         root.mainloop()
         return 0
+    ready()
     if os.environ.get("FAKE_SCRCPY_STUBBORN"):  # ignores being asked to quit, like a hung scrcpy
         import signal
 

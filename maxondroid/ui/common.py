@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, Qt
@@ -38,6 +39,19 @@ def label(text: str = "", role: str | None = None, wrap: bool = False, selectabl
     if selectable:
         lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard)
     return lbl
+
+
+def breakable(path: str) -> str:
+    """A path a word-wrapping label may break after any separator.
+
+    QLabel wraps only at spaces, so a long path without them made the whole
+    tab as wide as the path and cut off its right edge. The zero-width spaces
+    are for display only: labels showing them are not selectable, and the
+    real path goes into the tooltip.
+    """
+    text = str(path).replace("\\", "\\\u200b").replace("/", "/\u200b")
+    # very long folder names get break points too, every 24 characters
+    return re.sub(r"[^\s\u200b]{24}(?=[^\s\u200b])", lambda m: m.group(0) + "\u200b", text)
 
 
 class IconLabel(QWidget):

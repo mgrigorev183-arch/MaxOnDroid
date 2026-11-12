@@ -167,3 +167,35 @@ def test_open_stream_reads_as_it_comes(fake_adb):
         proc.kill()
         proc.wait(5)
     assert ["track-devices", "-l"] in fake_adb.calls()
+
+
+def test_cancel_kills_a_running_command(fake_adb):
+    import threading
+    import time
+
+    fake_adb.set_rules([{"args": ["pull", "*"], "stdout": "", "sleep": 30}])
+    cancel = threading.Event()
+    threading.Timer(0.5, cancel.set).start()
+    started = time.monotonic()
+    result = fake_adb.runner.run(["pull", "/sdcard/DCIM", "C:/x"], cancel=cancel, timeout=60)
+    assert time.monotonic() - started < 5
+    assert result.cancelled and not result.timed_out and not result.ok
+    assert "cancelled by the user" in result.output
+
+
+def test_cancel_not_set_lets_the_command_finish_and_still_times_out(fake_adb):
+    import threading
+
+    fake_adb.set_rules([{"args": ["push", "*"], "stdout": "1 file pushed\n", "sleep": 0.5}, {"args": ["pull", "*"], "sleep": 30}])
+    result = fake_adb.runner.run(["push", "a", "/sdcard/"], cancel=threading.Event(), timeout=10)
+    assert result.ok and "1 file pushed" in result.stdout
+    late = fake_adb.runner.run(["pull", "/x", "y"], cancel=threading.Event(), timeout=0.6)
+    assert late.timed_out and not late.cancelled
+
+
+def test_stream_can_merge_stderr(fake_adb):
+    fake_adb.set_rules([{"args": ["logcat"], "stdout": "line out\n", "stderr": "line err\n"}])
+    proc = fake_adb.runner.open_stream(["logcat"], merge_stderr=True)
+    data = proc.stdout.read()
+    proc.wait(5)
+    assert b"line out" in data and b"line err" in data

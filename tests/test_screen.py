@@ -188,16 +188,19 @@ def test_mp4_recording_uses_aac_audio():
 
 
 @pytest.fixture
-def windowed(monkeypatch):
+def windowed(monkeypatch, tmp_path):
     """On Windows the fake opens a real window, so stop() is tested with WM_CLOSE like scrcpy's SDL window."""
     monkeypatch.setenv("FAKE_SCRCPY_WINDOW", "1")
+    flag = tmp_path / "ready.txt"
+    monkeypatch.setenv("FAKE_SCRCPY_READY", str(flag))
+    return flag
 
 
 def test_recording_is_closed_properly_so_the_file_is_complete(scrcpy, tmp_path, windowed):
     target = tmp_path / "rec.mp4"
     session = scrcpy.start("rec:tv", SERIAL, ScrcpyOptions(), "t", record=target)
-    assert wait_for(lambda: target.exists() and target.read_bytes().startswith(b"FAKEREC"))
-    time.sleep(1.5 if sys.platform == "win32" else 0.3)  # the window has to exist before it can be closed
+    assert wait_for(lambda: windowed.exists(), 20)  # the window has to exist before it can be closed
+    assert target.read_bytes().startswith(b"FAKEREC")
     scrcpy.stop("rec:tv")
     assert not session.running
     assert session.graceful is True

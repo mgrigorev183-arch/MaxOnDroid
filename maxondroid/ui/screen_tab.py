@@ -32,7 +32,7 @@ from maxondroid.core.manager import DeviceView
 from maxondroid.core.screen import Scrcpy, ScrcpyError, ScrcpyOptions
 from maxondroid.i18n import tr
 from maxondroid.ui import icons, theme
-from maxondroid.ui.common import Banner, Placeholder, label, open_folder
+from maxondroid.ui.common import Banner, Placeholder, breakable, label, open_folder
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.tokens import token_label
 
@@ -201,9 +201,9 @@ class ScreenTab(QWidget):
         row.addWidget(self.record_format)
         row.addStretch(1)
         cap.addLayout(row)
-        self.capture_state = label("", role="muted", wrap=True, selectable=True)
+        self.capture_state = label("", role="muted", wrap=True)
         cap.addWidget(self.capture_state)
-        self.folder_label = label("", role="muted", wrap=True, selectable=True)
+        self.folder_label = label("", role="muted", wrap=True)
         cap.addWidget(self.folder_label)
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
@@ -510,7 +510,8 @@ class ScreenTab(QWidget):
             return
         self.stack.setCurrentIndex(1)
         self._render_tool_banner()
-        self.folder_label.setText(tr("screen.folder", path=str(self.capture_dir())))
+        self.folder_label.setText(tr("screen.folder", path=breakable(self.capture_dir())))
+        self.folder_label.setToolTip(str(self.capture_dir()))
         self._render_preview()
         self._update_state()
 
@@ -575,13 +576,13 @@ class ScreenTab(QWidget):
             self.record_button.setEnabled(False)
             _say(self.capture_state, tr("screen.record.finishing"))
         elif rec_running:
-            _say(self.capture_state, tr("screen.record.running", elapsed=_elapsed(recording.started), path=str(recording.record)))
+            _say(self.capture_state, tr("screen.record.running", elapsed=_elapsed(recording.started), path=breakable(recording.record)))
         elif recording is not None and recording.record and not recording.reported and rec_key not in self._finishing:
             recording.reported = True
             if recording.record.exists() and recording.graceful is False and recording.record.suffix.lower() == ".mp4":
-                _say(self.capture_state, tr("screen.record.saved_forced", path=str(recording.record)))
+                _say(self.capture_state, tr("screen.record.saved_forced", path=breakable(recording.record)))
             elif recording.record.exists():
-                _say(self.capture_state, tr("screen.record.saved", path=str(recording.record)))
+                _say(self.capture_state, tr("screen.record.saved", path=breakable(recording.record)))
             else:
                 _say(self.capture_state, tr("screen.record.failed", output=recording.tail() or "—"))
 
@@ -658,7 +659,7 @@ class ScreenTab(QWidget):
         def done(path: Path) -> None:
             self._busy_shot = False
             self.last_shot = path
-            _say(self.capture_state, tr("screen.screenshot.saved", path=str(path)))
+            _say(self.capture_state, tr("screen.screenshot.saved", path=breakable(path)))
             self._render_preview()
             self._update_state()
 
