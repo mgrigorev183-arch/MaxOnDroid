@@ -72,6 +72,21 @@ The Screen tab adds `scrcpy_path`, `capture_dir`, `capture_format` (`mp4` or `mk
 
 A device without an entry starts from the last used options, a TV from the Speed preset.
 
+## console.json — console history and saved commands
+
+Location: next to `settings.json`. Written atomically after each run and each change.
+
+```json
+{
+  "format": "maxondroid.console",
+  "version": 1,
+  "history": [{"mode": "adb", "text": "devices -l"}, {"mode": "shell", "text": "pm list packages -3"}],
+  "saved": [{"name": "Сторонние приложения", "mode": "shell", "text": "pm list packages -3"}]
+}
+```
+
+`mode` is `adb` (what follows `adb` in cmd) or `shell` (one line for the device shell). At most 200 history entries (oldest dropped) and 100 saved commands; entries of the wrong shape are skipped when loading. Settings also keep `console_mode` (the last mode) and `files_download_dir` (where the Files tab last copied to).
+
 ## diag-YYYY-MM-DD.log — diagnostics
 
 Location: `%LOCALAPPDATA%\MaxOnDroid\logs\`, next to the command journal, kept 14 days, at most 2 MB a day. Plain text, one entry per event:

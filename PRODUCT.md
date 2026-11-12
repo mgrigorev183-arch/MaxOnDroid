@@ -37,7 +37,7 @@ Version 1, delivered in stages:
 1. Shell, device list, connection (USB, IP, pairing by code and QR, mDNS discovery, saved devices with auto-reconnect), command journal, languages, themes, Overview tab.
 2. Apps tab (list, search, filters, install including split APKs, uninstall for user 0, disable/enable/restore, clear data, force-stop, launch, extract APK) and Debloat tab (UAD-ng package list snapshot plus on-demand update, custom presets in JSON, journal and undo).
 3. Remote tab (on-screen buttons, text input, PC keyboard shortcuts) and Screen tab (scrcpy with presets, screenshot, recording).
-4. Files tab (device browser, push, pull, drag and drop, new folder, delete with confirmation) and Console tab (adb and shell modes, history, saved commands).
+4. Files tab (device browser, push, pull, drag and drop, new folder, rename, delete with confirmation, cancellable copies) and Console tab (adb and shell modes, exact command preview, streaming output with Stop, history, saved commands).
 5. Installer, GitHub Actions build, security review, first release.
 
 Deferred to v2: batch actions across several devices, permission management, console autocompletion. Out of scope: iPhones, Windows PCs, fastboot flashing.

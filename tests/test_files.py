@@ -23,16 +23,18 @@ NASTY = "a b; touch PWNED $(touch PWNED2) `touch PWNED3` 'q' \"d\" |x"
 class LocalShell(AdbRunner):
     """Runs ``adb shell COMMAND`` as ``sh -c COMMAND`` on this machine, with device paths mapped into ``root``."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, path_env: str | None = None):
         super().__init__("adb")
         self.root = root
+        self.path_env = path_env  # a PATH without stat, like an old Android
         self.commands: list[str] = []
 
     def run(self, args, serial=None, timeout=None, *, log=True, secrets=(), cancel=None):
         assert args[0] == "shell" and len(args) == 2
         command = args[1].replace("/dev/", "\x00DEV\x00").replace("/sdcard", str(self.root / "sdcard")).replace("\x00DEV\x00", "/dev/")
         self.commands.append(args[1])
-        proc = subprocess.run(["sh", "-c", command], capture_output=True, cwd=self.root, timeout=30)
+        env = None if self.path_env is None else {"PATH": self.path_env}
+        proc = subprocess.run(["/bin/sh" if env else "sh", "-c", command], capture_output=True, cwd=self.root, timeout=30, env=env)
         return AdbResult(("-s", serial, *args), proc.returncode, proc.stdout.decode(), proc.stderr.decode(), 0.01, serial=serial)
 
 
@@ -168,3 +170,19 @@ def test_control_an_unquoted_name_would_run_commands(device):
     assert no_injection(device.root)
     device.run(["shell", f"ls /sdcard/Download/{NASTY}"])
     assert not no_injection(device.root)
+
+
+@needs_sh
+def test_listing_without_stat_falls_back_to_ls(device, tmp_path):
+    import shutil
+
+    bin_dir = tmp_path / "oldbin"
+    bin_dir.mkdir()
+    (bin_dir / "ls").symlink_to(shutil.which("ls"))
+    (bin_dir / "sh").symlink_to(shutil.which("sh"))
+    old = LocalShell(device.root, path_env=str(bin_dir))
+    entries = files.list_folder(old, SERIAL, "/sdcard")
+    by_name = {e.name: e for e in entries}
+    assert by_name["DCIM"].is_dir and by_name["notes.txt"].kind == "file"
+    assert ".hidden" in by_name
+    assert by_name["notes.txt"].size == 0  # sizes come only from stat: this listing came from ls

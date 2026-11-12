@@ -206,6 +206,12 @@ A single surface card ("pad") holds the d-pad and the navigation keys on the lef
 ### Screen
 Two cards: "Device screen" (brass "Open screen", "Close", Quality/Speed radios, a status line, and a "More options" disclosure with a plain form) and "Screenshots and recording" (Screenshot, Start/Stop recording, the capture folder, a 320×200 preview of the last screenshot with Copy and Open file). Status lines hide when empty so the cards keep no blank gaps. A muted note at the end explains why protected video is black. A missing or old scrcpy shows an error banner with "Download scrcpy" and "Set path". While a window is open the status line reads "Window open · 01:23 · 59 fps" (with skipped frames when scrcpy drops them); while it reopens after an option change it says so. Options belong to the selected device. Muted helper lines sit under the bit rate (rough figures per connection), under the keyboard option (how to pick a layout on the device) and, for TVs, under the status line (why the light preset). "Open folder" creates a missing folder and shows a warning if Explorer cannot open it.
 
+### Files
+A navigation row (Up, Home, an editable path field, Refresh, New folder as icon buttons), an action row (brass "Upload" with a Files…/Folder… menu, "Download…", "Rename", "Delete" with a danger-coloured trash icon), then the listing: a plain table with Name (folder icons in brass ink, file icons muted), Size right-aligned and Modified. Folders stay above files whatever the sort. Under it one status line for actions (copy progress with Cancel, results with "Open folder") and a muted line with the item count and the drag-and-drop hint. Deleting asks with a danger confirmation that lists the names, folders marked with a slash, and says there is no recycle bin.
+
+### Console
+Mode radios ("adb", "shell") with the selected device on the right; the input line in the code face with brass "Run" and "Stop"; under it a code-face line "Will run: adb …" or, in the error colour, why it cannot run. The output is a read-only code-face pane without wrapping, each run headed by "> adb …"; a narrow column on the right holds saved commands (muted hint while empty, "Save…" on its own row, Run and Delete under it). A status line at the bottom: "Done · exit code 0 · 1.2 s" or "Stopped after …".
+
 ## Do's and Don'ts
 
 - **Do** show the adb command behind every action in the journal, prefixed with the device token.

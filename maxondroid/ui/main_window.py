@@ -34,9 +34,11 @@ from maxondroid.ui import icons, theme
 from maxondroid.ui.apps_tab import AppsTab
 from maxondroid.ui.common import Banner, label, open_folder
 from maxondroid.ui.connect_dialog import ConnectDialog
+from maxondroid.ui.console_tab import ConsoleTab
 from maxondroid.ui.context import AppContext
 from maxondroid.ui.debloat_tab import DebloatTab
 from maxondroid.ui.device_list import DeviceListView
+from maxondroid.ui.files_tab import FileList, FilesTab
 from maxondroid.ui.journal_panel import JournalPanel
 from maxondroid.ui.overview_tab import OverviewTab
 from maxondroid.ui.package_support import PackageCache
@@ -147,7 +149,9 @@ class MainWindow(QMainWindow):
         self.debloat = DebloatTab(ctx)
         self.remote = RemoteTab(ctx)
         self.screen = ScreenTab(ctx)
-        for tab in (self.overview, self.apps, self.debloat, self.remote, self.screen):
+        self.files = FilesTab(ctx)
+        self.console = ConsoleTab(ctx)
+        for tab in (self.overview, self.apps, self.debloat, self.remote, self.screen, self.files, self.console):
             self.tabs.addTab(tab, "")
         self.setAcceptDrops(True)
         work_layout.addWidget(self.tabs, 1)
@@ -258,10 +262,14 @@ class MainWindow(QMainWindow):
         self.tabs.setTabText(2, tr("tab.debloat"))
         self.tabs.setTabText(3, tr("tab.remote"))
         self.tabs.setTabText(4, tr("tab.screen"))
+        self.tabs.setTabText(5, tr("tab.files"))
+        self.tabs.setTabText(6, tr("tab.console"))
         self.apps.retranslate()
         self.debloat.retranslate()
         self.remote.retranslate()
         self.screen.retranslate()
+        self.files.retranslate()
+        self.console.retranslate()
         self.connect_button.setText(tr("rail.connect"))
         self.rail_caption.setText(tr("rail.caption"))
         for button, key in ((self.rail_refresh, "menu.refresh"), (self.rail_settings, "menu.settings")):
@@ -289,6 +297,8 @@ class MainWindow(QMainWindow):
         self.debloat.apply_palette()
         self.remote.apply_palette()
         self.screen.apply_palette()
+        self.files.apply_palette()
+        self.console.apply_palette()
         self.apps.model.refresh_all()
         if self._connect_dialog is not None:
             self._connect_dialog.retranslate()  # re-tints its icons
@@ -340,6 +350,8 @@ class MainWindow(QMainWindow):
         if self._connect_dialog is not None:
             self._connect_dialog.stop_qr()
         self.screen.shutdown()
+        self.files.shutdown()
+        self.console.shutdown()
         self.ctx.tasks.shutdown(3000)
         super().closeEvent(event)
 
@@ -479,6 +491,8 @@ class MainWindow(QMainWindow):
         self.debloat.set_device(view)
         self.remote.set_device(view)
         self.screen.set_device(view)
+        self.files.set_device(view)
+        self.console.set_device(view)
 
     def _device_menu(self, pos) -> None:
         index = self.device_list.indexAt(pos)
@@ -544,10 +558,18 @@ class MainWindow(QMainWindow):
         self.act_journal.setChecked(expanded)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if AppsTab.dropped_files(event.mimeData()):
+        if self.tabs.currentWidget() is self.files and FileList.local_paths(event.mimeData()):
+            event.acceptProposedAction()  # on the Files tab anything dropped is copied, APKs too
+        elif AppsTab.dropped_files(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:  # noqa: N802
+        if self.tabs.currentWidget() is self.files:
+            paths = FileList.local_paths(event.mimeData())
+            if paths:
+                event.acceptProposedAction()
+                self.files.upload(paths)
+            return
         files = AppsTab.dropped_files(event.mimeData())
         if files:
             event.acceptProposedAction()

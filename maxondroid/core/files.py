@@ -20,13 +20,17 @@ LIST_TIMEOUT = 30.0
 TRANSFER_TIMEOUT = 6 * 3600.0  # a phone's whole camera folder over Wi-Fi; the user can cancel
 
 # Lists one folder: type|size|modified|name per entry, following links (/sdcard is one).
-# A link whose target is gone does not stat with -L; it is listed without following.
+# One stat call for all entries (a camera folder has thousands; a stat per file took seconds),
+# then links whose target is gone, which stat -L skips, are listed without following.
+# Without a stat command (old Android) names come from ls, folders marked by the trailing slash.
 LIST_SCRIPT = (
     'cd "$1" 2>/dev/null || { echo "@@denied"; exit 0; }; '
-    "for f in * .[!.]* ..?*; do "
-    '[ -e "$f" ] || [ -L "$f" ] || continue; '
-    "stat -L -c '%F|%s|%Y|%n' -- \"$f\" 2>/dev/null || stat -c '%F|%s|%Y|%n' -- \"$f\" 2>/dev/null || echo \"?|0|0|$f\"; "
-    "done; echo @@end"
+    "if ! command -v stat >/dev/null 2>&1; then "
+    'ls -1Ap | while read -r f; do case "$f" in */) echo "directory|0|0|${f%/}";; *) echo "regular file|0|0|$f";; esac; done; '
+    "echo @@end; exit 0; fi; "
+    "stat -L -c '%F|%s|%Y|%n' -- * .[!.]* ..?* 2>/dev/null; "
+    'for f in * .[!.]* ..?*; do if [ -L "$f" ] && [ ! -e "$f" ]; then '
+    "stat -c '%F|%s|%Y|%n' -- \"$f\" 2>/dev/null || echo \"?|0|0|$f\"; fi; done; echo @@end"
 )
 MKDIR_SCRIPT = '[ -e "$1" ] && { echo "@@exists"; exit 0; }; mkdir -- "$1" && echo @@ok'
 RENAME_SCRIPT = '[ -e "$2" ] && { echo "@@exists"; exit 0; }; mv -- "$1" "$2" && echo @@ok'

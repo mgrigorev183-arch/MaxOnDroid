@@ -244,6 +244,44 @@ def _input(p: QPainter) -> None:
     p.drawPath(_path([(8.5, 5.8), (10.2, 7.5), (8.5, 9.2)]))
 
 
+def _folder(p: QPainter) -> None:
+    p.drawPath(_path([(1.8, 4), (1.8, 13), (14.2, 13), (14.2, 5.6), (7.6, 5.6), (6.2, 3.4), (1.8, 3.4)], closed=True))
+
+
+def _file(p: QPainter) -> None:
+    p.drawPath(_path([(3.5, 1.8), (9.6, 1.8), (12.5, 4.7), (12.5, 14.2), (3.5, 14.2)], closed=True))
+    p.drawPath(_path([(9.6, 1.8), (9.6, 4.7), (12.5, 4.7)]))
+
+
+def _upload(p: QPainter) -> None:
+    p.drawLine(QPointF(8, 11), QPointF(8, 2.5))
+    p.drawPath(_path([(4.5, 6), (8, 2.5), (11.5, 6)]))
+    p.drawPath(_path([(2.5, 11), (2.5, 13.8), (13.5, 13.8), (13.5, 11)]))
+
+
+def _download(p: QPainter) -> None:
+    p.drawLine(QPointF(8, 2.5), QPointF(8, 11))
+    p.drawPath(_path([(4.5, 7.5), (8, 11), (11.5, 7.5)]))
+    p.drawPath(_path([(2.5, 11), (2.5, 13.8), (13.5, 13.8), (13.5, 11)]))
+
+
+def _new_folder(p: QPainter) -> None:
+    p.drawPath(_path([(8.4, 13), (1.8, 13), (1.8, 3.4), (6.2, 3.4), (7.6, 5.6), (14.2, 5.6), (14.2, 8.2)]))
+    p.drawLine(QPointF(12.3, 9.6), QPointF(12.3, 14.4))
+    p.drawLine(QPointF(9.9, 12), QPointF(14.7, 12))
+
+
+def _rename(p: QPainter) -> None:
+    p.drawPath(_path([(2.5, 13.5), (3.2, 10.6), (10.8, 3), (13, 5.2), (5.4, 12.8)], closed=True))
+    p.drawLine(QPointF(9.4, 4.4), QPointF(11.6, 6.6))
+
+
+def _terminal(p: QPainter) -> None:
+    p.drawRoundedRect(QRectF(1.8, 2.5, 12.4, 11), 1.5, 1.5)
+    p.drawPath(_path([(4.5, 6), (6.8, 8), (4.5, 10)]))
+    p.drawLine(QPointF(8.2, 10.4), QPointF(11.4, 10.4))
+
+
 DRAWERS: dict[str, Drawer] = {
     "warning": _warning,
     "refresh": _refresh,
@@ -288,6 +326,13 @@ DRAWERS: dict[str, Drawer] = {
     "enter": _enter,
     "delete": _delete,
     "input": _input,
+    "folder": _folder,
+    "file": _file,
+    "upload": _upload,
+    "download": _download,
+    "new_folder": _new_folder,
+    "rename": _rename,
+    "terminal": _terminal,
 }
 
 
