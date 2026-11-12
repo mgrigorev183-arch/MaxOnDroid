@@ -60,7 +60,7 @@ Location: `%APPDATA%\MaxOnDroid\settings.json`.
 
 `language` is `system`, `ru` or `en`; `theme` is `system`, `light` or `dark`; an empty `adb_path` means "bundled adb, otherwise the one on PATH". Values of the wrong type fall back to the defaults.
 
-The Screen tab adds `scrcpy_path`, `capture_dir`, the last used options (`screen_preset`, `screen_max_size`, `screen_bit_rate` 1–50, `screen_max_fps`, `screen_audio`, `screen_turn_off`, `screen_on_top`, `screen_stay_awake`, `screen_view_only`, `screen_keyboard` `sdk` or `uhid`) and `screen_devices`, the options of each device by its key (at most 64, the oldest dropped first):
+The Screen tab adds `scrcpy_path`, `capture_dir`, `capture_format` (`mp4` or `mkv`), the last used options (`screen_preset`, `screen_max_size`, `screen_bit_rate` 1–50, `screen_max_fps`, `screen_audio`, `screen_turn_off`, `screen_on_top`, `screen_stay_awake`, `screen_view_only`, `screen_keyboard` `sdk` or `uhid`) and `screen_devices`, the options of each device by its key (at most 64, the oldest dropped first):
 
 ```json
 "screen_devices": {
