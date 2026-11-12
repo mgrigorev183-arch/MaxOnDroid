@@ -132,7 +132,8 @@ def test_physical_keyboard_mode_and_layout_settings(win, qtbot, fake_adb):
     assert "--keyboard=uhid" in starts(win)[0]
     tab.keyboard_settings.click()
     qtbot.waitUntil(lambda: ["-s", PHONE, "shell", KEYBOARD_SETTINGS] in fake_adb.calls(), timeout=5000)
-    assert any(KEYBOARD_SETTINGS in e.command for e in win.ctx.journal.entries)  # visible in the journal
+    # visible in the journal (recorded when adb finishes, a moment after it starts)
+    qtbot.waitUntil(lambda: any(KEYBOARD_SETTINGS in e.command for e in win.ctx.journal.entries), timeout=5000)
     assert "Ctrl+Пробел" in tab.keyboard_hint.text()
     # scrcpy older than 2.4 has no --keyboard: the option is off limits
     win.screen.status_.version = (2, 3, 0)

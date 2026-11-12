@@ -1,5 +1,7 @@
 """The "Open folder" buttons: a missing folder is created, a failure is reported, the logs folder is one click away."""
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -30,7 +32,7 @@ def test_missing_folder_is_created_then_opened(qtbot, tmp_path, opened):
     assert not target.exists()
     assert common.open_folder(target) is True
     assert target.is_dir()
-    assert opened["urls"] == [str(target)] and opened["warnings"] == []
+    assert [Path(u) for u in opened["urls"]] == [target] and opened["warnings"] == []
 
 
 def test_failed_open_is_reported(qtbot, tmp_path, opened):
@@ -59,10 +61,10 @@ def test_screen_folder_button_and_logs_menu(qtbot, fake_adb, tmp_path, opened):
     try:
         w.screen.folder_open.click()
         assert (tmp_path / "never used yet").is_dir()
-        assert opened["urls"][-1] == str(tmp_path / "never used yet")
+        assert Path(opened["urls"][-1]) == tmp_path / "never used yet"
         assert w.act_logs in w.menu_help.actions() and w.act_logs.text()
         w.act_logs.trigger()
-        assert opened["urls"][-1] == str(paths.log_dir())
+        assert Path(opened["urls"][-1]) == paths.log_dir()
         assert paths.log_dir().is_dir()
     finally:
         w.timer.stop()
