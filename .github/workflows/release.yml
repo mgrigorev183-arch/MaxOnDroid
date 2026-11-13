@@ -24,6 +24,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
+  PYTHONUTF8: "1" # the self-test reports contain Russian text; the runner console is cp1252
   # scrcpy (Apache-2.0) with its adb; the hash is the one of the file published by Genymobile
   SCRCPY_VERSION: "5.0.1"
   SCRCPY_SHA256: "b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5"
