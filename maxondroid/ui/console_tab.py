@@ -313,6 +313,8 @@ class ConsoleTab(QWidget):
         seconds = f"{run.duration:.1f}".replace(".", tr("unit.decimal"))
         if run.stopped:
             self.status.setText(tr("console.stopped", seconds=seconds))
+        elif run.returncode == 1 and not run.output_tail().strip():
+            self.status.setText(tr("console.done_quiet", seconds=seconds))
         else:
             self.status.setText(tr("console.done", code=run.returncode, seconds=seconds))
         serial = next((run.command.args[i + 1] for i, a in enumerate(run.command.args[:-1]) if a == "-s"), None)

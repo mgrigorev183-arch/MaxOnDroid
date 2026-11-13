@@ -86,11 +86,17 @@ class Command:
     secrets: tuple[str, ...] = ()
 
     def display(self) -> str:
-        """As it would be typed in cmd, with pairing codes masked."""
+        """As the user would type it, with pairing codes masked.
+
+        Only arguments with spaces or quotes are quoted. A ``|`` stays bare: in
+        adb mode it is one more argument that adb hands to the device shell, so
+        the line reads as typed instead of a puzzling ``"|"``.
+        """
         shown = []
         for arg in self.args:
             value = "••••••" if arg in self.secrets else arg
-            shown.append(value if value and all(c not in value for c in " \"'&|<>^%") else '"' + value.replace('"', '\\"') + '"')
+            plain = value and not any(c.isspace() or c in "\"'" for c in value)
+            shown.append(value if plain else '"' + value.replace('"', '\\"') + '"')
         return " ".join(["adb", *shown])
 
 

@@ -24,7 +24,8 @@ TRANSFER_TIMEOUT = 6 * 3600.0  # a phone's whole camera folder over Wi-Fi; the u
 # then links whose target is gone, which stat -L skips, are listed without following.
 # Without a stat command (old Android) names come from ls, folders marked by the trailing slash.
 LIST_SCRIPT = (
-    'cd "$1" 2>/dev/null || { echo "@@denied"; exit 0; }; '
+    # entering is not reading: /data lets the shell user in but not list it
+    'cd "$1" 2>/dev/null && [ -r . ] || { echo "@@denied"; exit 0; }; '
     "if ! command -v stat >/dev/null 2>&1; then "
     'ls -1Ap | while read -r f; do case "$f" in */) echo "directory|0|0|${f%/}";; *) echo "regular file|0|0|$f";; esac; done; '
     "echo @@end; exit 0; fi; "

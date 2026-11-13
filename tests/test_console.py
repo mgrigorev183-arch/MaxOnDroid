@@ -131,3 +131,12 @@ def test_saved_commands_have_a_limit(tmp_path):
     assert len(store.saved) == console.MAX_SAVED
     store.add_saved("n5", "adb", "version")  # replacing an existing one is fine
     assert Command("adb", "x", ("devices",)).display() == "adb devices"
+
+
+def test_preview_shows_operators_as_typed():
+    command = build("adb", "shell ls -l /sdcard/ | grep D", S)
+    assert command.args == ("-s", S, "shell", "ls", "-l", "/sdcard/", "|", "grep", "D")
+    assert command.display() == f"adb -s {S} shell ls -l /sdcard/ | grep D"
+    assert '"|"' not in command.display()
+    assert build("adb", 'shell echo "a b" ; echo c&d', S).display() == f'adb -s {S} shell echo "a b" ; echo c&d'
+    assert build("shell", "ls -l /sdcard/ | grep D", S).display() == f'adb -s {S} shell "ls -l /sdcard/ | grep D"'

@@ -1,4 +1,4 @@
-"""Files tab: browse a device folder, copy files both ways, create, rename, delete.
+"""Files tab: browse a device folder, search below it, copy files both ways, create, rename, delete.
 
 Every action is one adb command shown in the journal: listing and changes run
 a short fixed script on the device with the path as its argument (see
@@ -12,10 +12,11 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtGui import QKeySequence, QShortcut, QStandardItem, QStandardItemModel
+from PySide6.QtCore import QModelIndex, QSortFilterProxyModel, Qt, QTimer
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from maxondroid.core import files
+from maxondroid.core import files, search
 from maxondroid.core.adb import AdbResult
 from maxondroid.core.files import FilesError, RemoteEntry
 from maxondroid.core.manager import DeviceView
@@ -44,6 +45,7 @@ from maxondroid.ui.package_support import confirm
 ENTRY_ROLE = Qt.ItemDataRole.UserRole + 1
 SORT_ROLE = Qt.ItemDataRole.UserRole + 2
 LISTED_IN_CONFIRM = 10
+SEARCH_DELAY_MS = 250  # filter after the user pauses typing
 
 
 def human_size(size: int) -> str:
@@ -111,6 +113,18 @@ class FilesTab(QWidget):
         self._load_id = 0
         self._transfer: threading.Event | None = None  # the running copy's cancel switch
         self.last_download: Path | None = None
+        # search: the device's list of everything below a folder, filtered here as you type
+        self.index: search.Index | None = None
+        self._index_key: str | None = None  # device the index belongs to
+        self._indexing: threading.Event | None = None
+        self.searching = False
+        self.search_root = files.HOME
+        self.results: list[RemoteEntry] = []
+        self._listing_stale = False
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DELAY_MS)
+        self._search_timer.timeout.connect(self._apply_search)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -133,7 +147,7 @@ class FilesTab(QWidget):
         self.path_edit = QLineEdit()
         self.path_edit.returnPressed.connect(lambda: self.open_folder_path(self.path_edit.text()))
         self.refresh_button = QToolButton()
-        self.refresh_button.clicked.connect(self.reload)
+        self.refresh_button.clicked.connect(self._refresh_clicked)
         # "new folder" is an icon beside the path, as in Explorer: the action row must fit a narrow window
         self.new_folder_button = QToolButton()
         self.new_folder_button.clicked.connect(self.new_folder)
@@ -145,6 +159,23 @@ class FilesTab(QWidget):
         nav.addWidget(self.refresh_button)
         nav.addWidget(self.new_folder_button)
         layout.addLayout(nav)
+
+        find_row = QHBoxLayout()
+        find_row.setSpacing(6)
+        self.search_edit = QLineEdit()
+        self.search_edit.setClearButtonEnabled(True)
+        self._search_action = self.search_edit.addAction(QIcon(), QLineEdit.ActionPosition.LeadingPosition)
+        self.search_edit.textChanged.connect(self._search_changed)
+        self.type_combo = QComboBox()
+        self.type_combo.currentIndexChanged.connect(self._search_changed)
+        self.custom_edit = QLineEdit()
+        self.custom_edit.textChanged.connect(self._search_changed)
+        self.custom_edit.setMaximumWidth(160)
+        self.custom_edit.hide()
+        find_row.addWidget(self.search_edit, 1)
+        find_row.addWidget(self.type_combo)
+        find_row.addWidget(self.custom_edit)
+        layout.addLayout(find_row)
 
         actions = FlowLayout(spacing=8)  # wraps on narrow windows and long translations
         self.upload_button = QPushButton()
@@ -163,30 +194,19 @@ class FilesTab(QWidget):
             actions.addWidget(button)
         layout.addLayout(actions)
 
-        self.model = QStandardItemModel(0, 3, self)
-        self.proxy = _DirsFirst(self)
-        self.proxy.setSourceModel(self.model)
-        self.proxy.setSortRole(SORT_ROLE)
-        self.proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.table = FileList(self.upload)
-        self.table.setModel(self.proxy)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSortingEnabled(True)
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
-        self.table.setWordWrap(False)
-        self.table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.model, self.proxy, self.table = self._make_table(3, self._activated)
         head = self.table.horizontalHeader()
-        head.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         head.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         head.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        head.setSortIndicator(0, Qt.SortOrder.AscendingOrder)
-        self.table.doubleClicked.connect(self._activated)
-        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
-        layout.addWidget(self.table, 1)
+        self.result_model, self.result_proxy, self.result_table = self._make_table(4, self._result_activated)
+        head = self.result_table.horizontalHeader()
+        head.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for column in (2, 3):
+            head.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+        self.views = QStackedWidget()
+        self.views.addWidget(self.table)
+        self.views.addWidget(self.result_table)
+        layout.addWidget(self.views, 1)
 
         transfer = QHBoxLayout()
         transfer.setSpacing(8)
@@ -208,13 +228,18 @@ class FilesTab(QWidget):
         layout.addLayout(bottom)
         self.stack.addWidget(page)
 
-        for keys, handler in (
-            (QKeySequence(Qt.Key.Key_Backspace), self.go_up),
-            (QKeySequence(Qt.Key.Key_Delete), self.delete),
-            (QKeySequence(Qt.Key.Key_F2), self.rename),
-            (QKeySequence(Qt.Key.Key_Return), self._enter_selected),
+        for table, keys, handler in (
+            (self.table, Qt.Key.Key_Backspace, self.go_up),
+            (self.table, Qt.Key.Key_Delete, self.delete),
+            (self.table, Qt.Key.Key_F2, self.rename),
+            (self.table, Qt.Key.Key_Return, self._enter_selected),
+            (self.result_table, Qt.Key.Key_Delete, self.delete),
+            (self.result_table, Qt.Key.Key_F2, self.rename),
+            (self.result_table, Qt.Key.Key_Return, self._enter_result),
+            (self.result_table, Qt.Key.Key_Escape, self.clear_search),
+            (self.search_edit, Qt.Key.Key_Escape, self.clear_search),
         ):
-            shortcut = QShortcut(keys, self.table)
+            shortcut = QShortcut(QKeySequence(keys), table)
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             shortcut.activated.connect(handler)
 
@@ -223,6 +248,29 @@ class FilesTab(QWidget):
         self.retranslate()
         self.render()
 
+    def _make_table(self, columns: int, on_activate):
+        model = QStandardItemModel(0, columns, self)
+        proxy = _DirsFirst(self)
+        proxy.setSourceModel(model)
+        proxy.setSortRole(SORT_ROLE)
+        proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        table = FileList(self.upload)
+        table.setModel(proxy)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSortingEnabled(True)
+        table.verticalHeader().hide()
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSortIndicator(0, Qt.SortOrder.AscendingOrder)
+        table.doubleClicked.connect(on_activate)
+        table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
+        return model, proxy, table
+
     # -- device ----------------------------------------------------------------------
     def set_device(self, view: DeviceView | None) -> None:
         old = self.view
@@ -230,6 +278,9 @@ class FilesTab(QWidget):
         if view is None or old is None or view.key != old.key or view.online != old.online:
             if old is not None:
                 self._folders[old.key] = self.folder
+            if view is None or old is None or view.key != old.key:
+                self._drop_index()
+                self.clear_search()
             self.render()
             if view is not None and view.online and (old is None or old.key != view.key or not old.online):
                 self.folder = self._folders.get(view.key, files.HOME)
@@ -248,6 +299,20 @@ class FilesTab(QWidget):
     # -- texts and look --------------------------------------------------------------
     def retranslate(self) -> None:
         self.model.setHorizontalHeaderLabels([tr("files.col.name"), tr("files.col.size"), tr("files.col.modified")])
+        self.result_model.setHorizontalHeaderLabels([tr("files.col.name"), tr("files.col.location"), tr("files.col.size"), tr("files.col.modified")])
+        self.search_edit.setPlaceholderText(tr("files.search.placeholder"))
+        self.search_edit.setToolTip(tr("files.search.tip"))
+        self.custom_edit.setPlaceholderText(tr("files.search.custom"))
+        self.custom_edit.setToolTip(tr("files.search.custom.tip"))
+        current = self.type_combo.currentData() or "all"
+        self.type_combo.blockSignals(True)
+        self.type_combo.clear()
+        for kind in search.KINDS:
+            self.type_combo.addItem(tr(f"files.type.{kind}"), kind)
+            if kind in search.TYPES:
+                self.type_combo.setItemData(self.type_combo.count() - 1, ", ".join(search.TYPES[kind]), Qt.ItemDataRole.ToolTipRole)
+        self.type_combo.setCurrentIndex(max(0, self.type_combo.findData(current)))
+        self.type_combo.blockSignals(False)
         self.up_button.setToolTip(tr("files.up"))
         self.home_button.setToolTip(tr("files.home", path=files.HOME))
         self.refresh_button.setToolTip(tr("files.refresh"))
@@ -267,13 +332,19 @@ class FilesTab(QWidget):
         head = self.table.horizontalHeader()
         head.resizeSection(1, max(metrics.horizontalAdvance(t) for t in (human_size(999 * 1024**2), tr("files.col.size"))) + 32)
         head.resizeSection(2, max(metrics.horizontalAdvance(t) for t in ("30.12.2026 23:59", tr("files.col.modified"))) + 32)
+        result_head = self.result_table.horizontalHeader()
+        result_head.resizeSection(2, head.sectionSize(1))
+        result_head.resizeSection(3, head.sectionSize(2))
         self._fill()
+        if self.searching and self.index is not None:
+            self._show_results()
         self.apply_palette()
         if self.view is None or not self.view.online:
             self.render()
 
     def apply_palette(self) -> None:
         p = self.ctx.palette
+        self._search_action.setIcon(icons.icon("search", p.text_muted))
         self.up_button.setIcon(icons.icon("up", p.text))
         self.home_button.setIcon(icons.icon("home", p.text))
         self.refresh_button.setIcon(icons.icon("refresh", p.text))
@@ -296,6 +367,8 @@ class FilesTab(QWidget):
         runner = self.ctx.runner
         if view is None or not view.online or runner is None:
             return
+        if self.searching:
+            self.clear_search()  # going somewhere ends the search
         target = files.normalize(path)
         serial = view.serial
         self._load_id += 1
@@ -359,8 +432,9 @@ class FilesTab(QWidget):
             self.table.scrollTo(self.proxy.index(first, 0))
 
     def selected(self) -> list[RemoteEntry]:
-        rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
-        return [e for e in (self.proxy.index(r, 0).data(ENTRY_ROLE) for r in rows) if e is not None]
+        table, proxy = (self.result_table, self.result_proxy) if self.searching else (self.table, self.proxy)
+        rows = sorted({i.row() for i in table.selectionModel().selectedRows()})
+        return [e for e in (proxy.index(r, 0).data(ENTRY_ROLE) for r in rows) if e is not None]
 
     def _activated(self, index: QModelIndex) -> None:
         entry = self.proxy.index(index.row(), 0).data(ENTRY_ROLE)
@@ -373,11 +447,11 @@ class FilesTab(QWidget):
             self.open_folder_path(chosen[0].path)
 
     # -- changes ---------------------------------------------------------------------
-    def _run(self, work, done_text) -> None:
-        """Run a change in the background, then reload and report."""
+    def _run(self, work, done_text, after=None) -> None:
+        """Run a change in the background, then reload (or update the search) and report."""
         def done(result) -> None:
             self._say(done_text(result))
-            self.reload_after(result)
+            (after or self.reload_after)(result)
 
         def failed(exc: BaseException) -> None:
             self._say(self._error_text(exc))
@@ -386,6 +460,11 @@ class FilesTab(QWidget):
         self.ctx.tasks.submit(work, done, failed)
 
     def reload_after(self, result) -> None:
+        self.index = None  # the folder changed: a later search asks the device again
+        if self.searching:  # copied in while searching: ask the device again for the results
+            self._listing_stale = True
+            self._build_index()
+            return
         self.open_folder_path(self.folder, select=result if isinstance(result, str) else None)
 
     def _error_text(self, exc: BaseException) -> str:
@@ -411,7 +490,14 @@ class FilesTab(QWidget):
         if not ok or not name.strip() or name.strip() == entry.name:
             return
         runner, serial = self.ctx.runner, self.view.serial
-        self._run(lambda: files.rename(runner, serial, entry.path, name), lambda path: tr("files.renamed", path=path))
+        after = None
+        if self.searching:
+            def after(path: str) -> None:
+                self._listing_stale = True
+                if self.index is not None:
+                    self.index = self.index.renamed(entry.path, path)
+                self._show_results(select=path)
+        self._run(lambda: files.rename(runner, serial, entry.path, name), lambda path: tr("files.renamed", path=path), after)
 
     def delete(self) -> None:
         chosen = self.selected()
@@ -421,7 +507,7 @@ class FilesTab(QWidget):
         if blocked:
             QMessageBox.warning(self, tr("files.delete.title"), tr("files.error.protected", details=", ".join(blocked)))
             return
-        names = [e.name + ("/" if e.is_dir else "") for e in chosen]
+        names = [(e.path if self.searching else e.name) + ("/" if e.is_dir else "") for e in chosen]
         listed = "\n".join(names[:LISTED_IN_CONFIRM])
         if len(names) > LISTED_IN_CONFIRM:
             listed += "\n" + tr("files.delete.more", count=len(names) - LISTED_IN_CONFIRM)
@@ -436,7 +522,14 @@ class FilesTab(QWidget):
         if not ok:
             return
         runner, serial, paths = self.ctx.runner, self.view.serial, [e.path for e in chosen]
-        self._run(lambda: files.remove(runner, serial, paths), lambda _r: tr("files.deleted", count=len(paths)))
+        after = None
+        if self.searching:
+            def after(_result) -> None:
+                self._listing_stale = True
+                if self.index is not None:
+                    self.index = self.index.without(paths)
+                self._show_results()
+        self._run(lambda: files.remove(runner, serial, paths), lambda _r: tr("files.deleted", count=len(paths)), after)
 
     # -- copies ----------------------------------------------------------------------
     def upload_files(self) -> None:
@@ -526,11 +619,175 @@ class FilesTab(QWidget):
         self.ctx.tasks.submit(lambda: work(cancel), done, failed)
 
     def cancel_transfer(self) -> None:
+        """Cancel the running copy, or the running search index."""
         if self._transfer is not None:
             self._transfer.set()
+        if self._indexing is not None:
+            self._indexing.set()
 
     def shutdown(self) -> None:
         self.cancel_transfer()
+
+    # -- search ----------------------------------------------------------------------
+    def _query(self) -> tuple[str, str, tuple[str, ...]]:
+        kind = self.type_combo.currentData() or "all"
+        return self.search_edit.text(), kind, search.parse_extensions(self.custom_edit.text())
+
+    def _search_changed(self, *_args) -> None:
+        self.custom_edit.setVisible(self.type_combo.currentData() == "custom")
+        self._search_timer.start()
+
+    def _apply_search(self) -> None:
+        query, kind, custom = self._query()
+        if not query.strip() and kind == "all":
+            self._leave_search()
+            return
+        if not self._ready():
+            return
+        if kind == "custom" and not custom:
+            return  # wait until an extension is typed
+        if not self.searching:
+            self.searching = True
+            self.search_root = self.folder
+            self.views.setCurrentIndex(1)
+            self._update_buttons()
+        if self.index is not None and self._index_key == self.view.key and self.index.covers(self.search_root):
+            self._show_results()
+        else:
+            self._build_index()
+
+    def _build_index(self) -> None:
+        if self._indexing is not None or not self._ready():
+            return
+        cancel = threading.Event()
+        self._indexing = cancel
+        runner, serial, key, root = self.ctx.runner, self.view.serial, self.view.key, self.search_root
+        self.result_model.removeRows(0, self.result_model.rowCount())
+        self.status.setText("")
+        self._say(tr("files.search.indexing", folder=root))
+        self.cancel_button.show()
+
+        def done(outcome) -> None:
+            index, _result = outcome
+            self._indexing = None
+            self.cancel_button.setVisible(self._transfer is not None)
+            if index is None:
+                self._say(tr("files.search.cancelled"))
+                return
+            if self.view is None or self.view.key != key:
+                return  # the device changed meanwhile
+            self.index, self._index_key = index, key
+            self._say("")
+            if self.searching:
+                self._apply_search()
+
+        def failed(exc: BaseException) -> None:
+            self._indexing = None
+            self.cancel_button.setVisible(self._transfer is not None)
+            self._say(self._error_text(exc))
+
+        self.ctx.tasks.submit(lambda: search.build_index(runner, serial, root, cancel=cancel), done, failed)
+
+    def _show_results(self, select: str | None = None) -> None:
+        if self.index is None:
+            return
+        query, kind, custom = self._query()
+        within = self.index.below(self.search_root)
+        self.results = search.search(within, query, kind, custom)
+        self._fill_results(select)
+        shown = min(len(self.results), search.MAX_SHOWN)
+        if not self.results:
+            self.status.setText(tr("files.search.none", total=len(within), folder=self.search_root))
+        elif shown < len(self.results):
+            self.status.setText(tr("files.search.capped", shown=shown, count=len(self.results), total=len(within), folder=self.search_root))
+        else:
+            self.status.setText(tr("files.search.found", count=len(self.results), total=len(within), folder=self.search_root))
+        self._update_buttons()
+
+    def _fill_results(self, select: str | None = None) -> None:
+        p = self.ctx.palette
+        folder_icon = icons.icon("folder", p.brass_text)
+        file_icon = icons.icon("file", p.text_muted)
+        keep = {select} if select else {e.path for e in self.selected()} if self.searching else set()
+        self.result_table.setSortingEnabled(False)
+        self.result_model.removeRows(0, self.result_model.rowCount())
+        for entry in self.results[: search.MAX_SHOWN]:
+            name = QStandardItem(folder_icon if entry.is_dir else file_icon, entry.name)
+            name.setData(entry, ENTRY_ROLE)
+            name.setData(entry.name.casefold(), SORT_ROLE)
+            name.setToolTip(entry.path)
+            where = search.location(entry)
+            place = QStandardItem(where)
+            place.setData(where.casefold(), SORT_ROLE)
+            place.setToolTip(where)
+            size = QStandardItem("" if entry.is_dir else human_size(entry.size))
+            size.setData(-1 if entry.is_dir else entry.size, SORT_ROLE)
+            size.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            when = QStandardItem(datetime.fromtimestamp(entry.modified).strftime("%d.%m.%Y %H:%M") if entry.modified else "")
+            when.setData(entry.modified, SORT_ROLE)
+            self.result_model.appendRow([name, place, size, when])
+        self.result_table.setSortingEnabled(True)
+        selection = self.result_table.selectionModel()
+        for row in range(self.result_proxy.rowCount()):
+            entry = self.result_proxy.index(row, 0).data(ENTRY_ROLE)
+            if entry is not None and entry.path in keep:
+                selection.select(self.result_proxy.index(row, 0), selection.SelectionFlag.Select | selection.SelectionFlag.Rows)
+
+    def _leave_search(self) -> None:
+        if not self.searching:
+            return
+        self.searching = False
+        self.views.setCurrentIndex(0)
+        self.status.setText(tr("files.count", count=len(self.entries)) if self.entries else tr("files.empty"))
+        if self._listing_stale:
+            self._listing_stale = False
+            self.open_folder_path(self.folder)
+        self._update_buttons()
+
+    def clear_search(self) -> None:
+        """Back to the folder: empty query, all types."""
+        for widget in (self.search_edit, self.type_combo, self.custom_edit):
+            widget.blockSignals(True)
+        self.search_edit.clear()
+        self.type_combo.setCurrentIndex(max(0, self.type_combo.findData("all")))
+        self.custom_edit.clear()
+        self.custom_edit.hide()
+        for widget in (self.search_edit, self.type_combo, self.custom_edit):
+            widget.blockSignals(False)
+        self._search_timer.stop()
+        self._leave_search()
+
+    def _drop_index(self) -> None:
+        if self._indexing is not None:
+            self._indexing.set()
+        self.index = None
+        self._index_key = None
+
+    def _refresh_clicked(self) -> None:
+        if self.searching:
+            self.index = None
+            self._build_index()
+        else:
+            self.index = None
+            self.reload()
+
+    def _result_activated(self, index: QModelIndex) -> None:
+        entry = self.result_proxy.index(index.row(), 0).data(ENTRY_ROLE)
+        if entry is not None:
+            self._go_to(entry)
+
+    def _enter_result(self) -> None:
+        chosen = self.selected()
+        if len(chosen) == 1:
+            self._go_to(chosen[0])
+
+    def _go_to(self, entry: RemoteEntry) -> None:
+        """Open a found folder, or the folder a found file is in with the file selected."""
+        self.clear_search()
+        if entry.is_dir:
+            self.open_folder_path(entry.path)
+        else:
+            self.open_folder_path(files.parent(entry.path), select=entry.path)
 
     # -- helpers ---------------------------------------------------------------------
     def _ready(self) -> bool:
@@ -541,11 +798,11 @@ class FilesTab(QWidget):
 
     def _update_buttons(self) -> None:
         chosen = self.selected() if self.stack.currentIndex() == 1 else []
+        self.new_folder_button.setEnabled(self._ready() and not self.searching)
         ready = self._ready()
         busy = self._transfer is not None
-        self.up_button.setEnabled(ready and self.folder != "/")
+        self.up_button.setEnabled(ready and self.folder != "/" and not self.searching)
         self.upload_button.setEnabled(ready and not busy)
         self.download_button.setEnabled(ready and not busy and bool(chosen))
-        self.new_folder_button.setEnabled(ready)
         self.rename_button.setEnabled(ready and len(chosen) == 1)
         self.delete_button.setEnabled(ready and bool(chosen))

@@ -20,7 +20,7 @@ PHONE = "R58M12ABCDE"
 DEVICES = f"List of devices attached\n{PHONE}\tdevice usb:1-1 product:beyond1 model:SM_G973F device:beyond1 transport_id:3\n\n"
 RULES = [
     {"args": ["devices", "-l"], "stdout": DEVICES},
-    {"args": ["-s", PHONE, "shell", "ls -l /sdcard | grep D"], "stdout": "drwxrws--- 2 u0 DCIM\ndrwxrws--- 2 u0 Download\n"},
+    {"args": ["-s", PHONE, "shell", "ls -l /sdcard/ | grep D"], "stdout": "drwxrws--- 2 u0 DCIM\ndrwxrws--- 2 u0 Download\n"},
     {"args": ["-s", PHONE, "logcat"], "stream": [{"data": "11-13 01:00:00 I/Tag: hello\n", "sleep": 60}]},
     {"args": ["-s", PHONE, "getprop", "x"], "stdout": "", "stderr": "adb: unknown command getprop\n", "rc": 1},
     {"args": ["pair", "192.168.1.23:37159", "482913"], "stdout": "Successfully paired to 192.168.1.23:37159\n"},
@@ -73,9 +73,9 @@ def test_adb_mode_previews_runs_and_journals(win, qtbot):
 
 
 def test_shell_mode_sends_the_line_to_the_device(win, qtbot):
-    run(win, qtbot, "shell", "ls -l /sdcard | grep D")
+    run(win, qtbot, "shell", "ls -l /sdcard/ | grep D")
     text = win.console.output.toPlainText()
-    assert f'> adb -s {PHONE} shell "ls -l /sdcard | grep D"' in text
+    assert f'> adb -s {PHONE} shell "ls -l /sdcard/ | grep D"' in text
     assert "DCIM" in text and "Download" in text
 
 
@@ -115,14 +115,14 @@ def test_stop_a_streaming_command(win, qtbot):
 def test_history_walks_with_arrows_and_persists(win, qtbot):
     tab = win.console
     run(win, qtbot, "adb", "devices -l")
-    run(win, qtbot, "shell", "ls -l /sdcard | grep D")
+    run(win, qtbot, "shell", "ls -l /sdcard/ | grep D")
     tab.input.setText("черновик")
 
     def key(k):
         QApplication.sendEvent(tab.input, QKeyEvent(QEvent.Type.KeyPress, k, Qt.KeyboardModifier.NoModifier))
 
     key(Qt.Key.Key_Up)
-    assert tab.input.text() == "ls -l /sdcard | grep D" and tab.mode == "shell"
+    assert tab.input.text() == "ls -l /sdcard/ | grep D" and tab.mode == "shell"
     key(Qt.Key.Key_Up)
     assert tab.input.text() == "devices -l" and tab.mode == "adb"
     key(Qt.Key.Key_Up)
@@ -131,13 +131,13 @@ def test_history_walks_with_arrows_and_persists(win, qtbot):
     key(Qt.Key.Key_Down)
     assert tab.input.text() == "черновик"
     saved = ConsoleStore.load(paths.config_dir() / "console.json")
-    assert saved.history[-2:] == [("adb", "devices -l"), ("shell", "ls -l /sdcard | grep D")]
+    assert saved.history[-2:] == [("adb", "devices -l"), ("shell", "ls -l /sdcard/ | grep D")]
 
 
 def test_saved_commands(win, qtbot, monkeypatch):
     tab = win.console
     tab.mode_shell.setChecked(True)
-    tab.input.setText("ls -l /sdcard | grep D")
+    tab.input.setText("ls -l /sdcard/ | grep D")
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Папки на карте", True)))
     tab.save_button.click()
     assert tab.saved_list.count() == 1 and tab.saved_list.item(0).text() == "Папки на карте"
@@ -180,9 +180,28 @@ def test_screenshots(win, qtbot):
     if not folder:
         pytest.skip("set SCREENSHOT_DIR to save screenshots")
     Path(folder).mkdir(parents=True, exist_ok=True)
-    run(win, qtbot, "shell", "ls -l /sdcard | grep D")
+    run(win, qtbot, "shell", "ls -l /sdcard/ | grep D")
     win.resize(960, 760)
     for theme in ("light", "dark"):
         win._set_theme(theme)
         qtbot.wait(150)
         win.grab().save(str(Path(folder) / f"stage4-console-{theme}.png"))
+
+
+def test_exit_code_1_without_output_is_explained(win, qtbot, fake_adb):
+    fake_adb.set_rules(RULES[:1] + [{"args": ["-s", PHONE, "shell", "ls -l /sdcard | grep D"], "stdout": "", "rc": 1}] + RULES[1:])
+    tab = win.console
+    tab.mode_shell.setChecked(True)
+    tab.input.setText("ls -l /sdcard | grep D")
+    tab.run_button.click()
+    qtbot.waitUntil(lambda: tab.run is not None and not tab.run.running and "Код 1" in tab.status.text(), timeout=10000)
+    assert "ничего не нашли" in tab.status.text()
+    tab.input.clear()
+    assert "/sdcard/" in tab.preview.text()  # the example shows the slash
+
+
+def test_preview_in_adb_mode_shows_the_pipe_bare(win):
+    tab = win.console
+    tab.mode_adb.setChecked(True)
+    tab.input.setText("shell ls -l /sdcard/ | grep D")
+    assert tab.preview.text() == f"Будет выполнено: adb -s {PHONE} shell ls -l /sdcard/ | grep D"

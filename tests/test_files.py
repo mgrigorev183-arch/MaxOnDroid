@@ -23,10 +23,11 @@ NASTY = "a b; touch PWNED $(touch PWNED2) `touch PWNED3` 'q' \"d\" |x"
 class LocalShell(AdbRunner):
     """Runs ``adb shell COMMAND`` as ``sh -c COMMAND`` on this machine, with device paths mapped into ``root``."""
 
-    def __init__(self, root: Path, path_env: str | None = None):
+    def __init__(self, root: Path, path_env: str | None = None, as_nobody: bool = False):
         super().__init__("adb")
         self.root = root
         self.path_env = path_env  # a PATH without stat, like an old Android
+        self.as_nobody = as_nobody  # an ordinary user, like adb's shell user, so permissions apply
         self.commands: list[str] = []
 
     def run(self, args, serial=None, timeout=None, *, log=True, secrets=(), cancel=None):
@@ -34,7 +35,10 @@ class LocalShell(AdbRunner):
         command = args[1].replace("/dev/", "\x00DEV\x00").replace("/sdcard", str(self.root / "sdcard")).replace("\x00DEV\x00", "/dev/")
         self.commands.append(args[1])
         env = None if self.path_env is None else {"PATH": self.path_env}
-        proc = subprocess.run(["/bin/sh" if env else "sh", "-c", command], capture_output=True, cwd=self.root, timeout=30, env=env)
+        argv = ["/bin/sh" if env else "sh", "-c", command]
+        if self.as_nobody:
+            argv = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", *argv]
+        proc = subprocess.run(argv, capture_output=True, cwd=self.root, timeout=30, env=env)
         return AdbResult(("-s", serial, *args), proc.returncode, proc.stdout.decode(), proc.stderr.decode(), 0.01, serial=serial)
 
 
@@ -186,3 +190,38 @@ def test_listing_without_stat_falls_back_to_ls(device, tmp_path):
     assert by_name["DCIM"].is_dir and by_name["notes.txt"].kind == "file"
     assert ".hidden" in by_name
     assert by_name["notes.txt"].size == 0  # sizes come only from stat: this listing came from ls
+
+
+def nobody_device():
+    """A device tree an ordinary user can walk, with a folder like /data: enterable, not readable."""
+    import os
+    import shutil
+    import tempfile
+
+    if sys.platform == "win32" or os.geteuid() != 0 or not shutil.which("setpriv"):
+        pytest.skip("needs root to switch to an ordinary user with setpriv")
+    base = Path(tempfile.mkdtemp())
+    base.chmod(0o755)
+    (base / "sdcard" / "Pictures").mkdir(parents=True)
+    (base / "sdcard" / "Pictures" / "a.jpg").write_text("x")
+    locked = base / "sdcard" / "data"
+    (locked / "inside").mkdir(parents=True)
+    for folder in (base / "sdcard", base / "sdcard" / "Pictures", locked / "inside"):
+        folder.chmod(0o755)
+    (base / "sdcard" / "Pictures" / "a.jpg").chmod(0o644)
+    locked.chmod(0o311)  # x without r, like /data for the shell user
+    return LocalShell(base, as_nobody=True), base
+
+
+def test_unreadable_folder_is_no_access_not_empty():
+    import shutil
+
+    device, base = nobody_device()
+    try:
+        with pytest.raises(FilesError) as denied:
+            files.list_folder(device, SERIAL, "/sdcard/data")
+        assert denied.value.code == "denied"
+        assert [e.name for e in files.list_folder(device, SERIAL, "/sdcard/Pictures")] == ["a.jpg"]  # control
+    finally:
+        (base / "sdcard" / "data").chmod(0o755)
+        shutil.rmtree(base)
