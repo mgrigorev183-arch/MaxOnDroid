@@ -4,7 +4,36 @@
 
 *English summary below.*
 
-> **Состояние:** этап 3 из 5. Готовы окно, список устройств, подключение (USB, адрес, сопряжение по коду и QR, поиск в сети), вкладки «Обзор», «Приложения», «Чистка», «Пульт» и «Экран», журнал команд, русский и английский языки, светлая и тёмная темы. Установщика пока нет: приложение запускается из исходников (инструкция ниже).
+> **Состояние:** выпуск 0.9.0, все пять этапов готовы. Есть установщик для Windows 10 и 11: [страница выпусков](https://github.com/mgrigorev183-arch/MaxOnDroid/releases/latest).
+
+## Установка
+
+1. Откройте [последний выпуск](https://github.com/mgrigorev183-arch/MaxOnDroid/releases/latest) и скачайте `MaxOnDroid-0.9.0-setup.exe` (номер версии может быть новее).
+2. **Проверьте, что файл не повреждён и не подменён.** На странице выпуска указан его SHA-256 (он же лежит рядом в файле `.sha256`). В PowerShell в папке со скачанным файлом:
+
+   ```powershell
+   (Get-FileHash .\MaxOnDroid-0.9.0-setup.exe -Algorithm SHA256).Hash
+   ```
+
+   или в обычной командной строке:
+
+   ```bat
+   certutil -hashfile MaxOnDroid-0.9.0-setup.exe SHA256
+   ```
+
+   Строка должна совпасть с опубликованной (регистр букв не важен). Не совпала — не запускайте файл и скачайте заново.
+3. Запустите установщик. Он не подписан сертификатом, поэтому Windows может показать синее окно «Windows защитила ваш компьютер» (SmartScreen). Если хеш совпал, нажмите **«Подробнее»**, затем **«Выполнить в любом случае»**.
+4. Выберите язык и папку. Права администратора не нужны: программа ставится только для вас, по умолчанию в `%LOCALAPPDATA%\Programs\MaxOnDroid`. Program Files и другие папки, куда без администратора не записать, установщик не примет и предложит папку в вашем профиле.
+
+Внутри уже есть adb и scrcpy 5.0.1, отдельно их ставить не нужно. Если у вас свой `adb`, его можно указать в настройках.
+
+### Обновление
+
+Раз в день MaxOnDroid спрашивает у GitHub номер последнего выпуска. Если вышел новый, над списком устройств появляется полоса со ссылкой на страницу выпуска. Программа сама ничего не скачивает: скачайте новый установщик, сверьте SHA-256 и запустите его поверх старой версии, настройки и список устройств сохранятся. Проверить вручную можно в меню «Справка» → «Проверить обновления», выключить автоматическую проверку — в настройках.
+
+### Удаление
+
+«Параметры» → «Приложения» → MaxOnDroid → «Удалить» (или «Пуск» → правый щелчок по MaxOnDroid → «Удалить»). Удаление спросит, стереть ли и ваши данные: настройки, список устройств, журналы и копии APK. По умолчанию они остаются. Скриншоты и записи экрана в папке «Изображения\MaxOnDroid» не удаляются никогда.
 
 ## Что умеет сейчас
 
@@ -28,7 +57,7 @@
 - **Консоль:** два режима. В режиме adb пишется то, что после `adb` в командной строке; `-s` для выбранного устройства подставляется сам. В режиме shell строка уходит в оболочку устройства, как после `adb shell` (работают `|`, `;`, кавычки). Под строкой ввода видна точная команда, вывод идёт по мере появления, долгие команды (`logcat`, `top`) останавливает кнопка. История стрелками вверх и вниз, сохранённые команды справа. Интерактивную оболочку (голый `adb shell`) консоль не запускает и объясняет почему. Команды не проходят через cmd.exe: текст разбирается на аргументы самим приложением. Каждая команда попадает в журнал, коды сопряжения скрыты.
 - **Защита от поломок:** системные приложения удаляются только для пользователя (`pm uninstall -k --user 0`) и возвращаются одной кнопкой. Установленные вами приложения перед удалением сохраняются на компьютер. Для важных пакетов (главный экран, клавиатура, сервисы Google, обновления) отдельное красное подтверждение. Пакеты, без которых перестанет работать сам adb, MaxOnDroid не трогает.
 
-## Запуск из исходников (Windows 10)
+## Запуск из исходников (для разработки)
 
 1. Установите [Python 3.11 или новее](https://www.python.org/downloads/windows/). В установщике отметьте «Add python.exe to PATH».
 2. Установите [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (в архиве лежит `adb.exe`) и либо добавьте папку в `PATH`, либо после запуска укажите путь к `adb.exe` в настройках приложения. Если `adb` у вас уже работает из `cmd`, ничего делать не нужно.
@@ -57,13 +86,14 @@ ruff check .
 
 - `adb` всегда запускается со списком аргументов, без командной оболочки Windows: имя устройства или путь не превратятся во вторую команду.
 - Всё, что уходит в `adb shell` из ввода пользователя, экранируется для shell на устройстве.
-- Приложение не открывает сетевых портов на компьютере и не отправляет в интернет никаких данных. Единственный запрос в интернет — скачивание свежей базы UAD-ng с GitHub, и только по кнопке «Обновить базу».
+- Приложение не открывает сетевых портов на компьютере и не отправляет в интернет никаких данных. В интернет оно обращается только к GitHub и только по HTTPS: раз в день узнаёт номер последнего выпуска (выключается в настройках) и скачивает свежую базу UAD-ng по кнопке «Обновить базу». Обновления программа не скачивает и не устанавливает сама, только показывает ссылку.
 - Ключи `adb` (`%USERPROFILE%\.android\adbkey`) приложение не читает и не копирует.
 - Подсеть не сканируется: устройства находятся только через mDNS, который они сами объявляют.
+- Установщик собирается в GitHub Actions из этого репозитория: сборочные пакеты закреплены по SHA-256, архив scrcpy сверяется с опубликованным хешем, а готовый установщик перед публикацией ставится, проходит самопроверку и удаляется. Отчёт о проверке безопасности: [docs/security-review.md](docs/security-review.md).
 
 ## Где хранятся данные
 
-Если Python установлен из Microsoft Store, Windows хранит эти папки в `%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python…\LocalCache\…`. Кнопки «Открыть папку» в MaxOnDroid открывают именно это место, а путь видно в настройках. В собранном установщике (этап 5) такой подмены нет.
+Если Python установлен из Microsoft Store, Windows хранит эти папки в `%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python…\LocalCache\…`. Кнопки «Открыть папку» в MaxOnDroid открывают именно это место, а путь видно в настройках. У программы, поставленной установщиком, такой подмены нет.
 
 | Что | Где |
 |---|---|
@@ -73,15 +103,15 @@ ruff check .
 
 Журнал диагностики пишет только время: какие команды adb выполнялись дольше секунды и где программа стояла, если окно не отвечало дольше полсекунды. Вывода команд и личных данных в нём нет; его можно приложить к сообщению об ошибке.
 
-Форматы файлов описаны в [docs/formats.md](docs/formats.md).
+Сама программа после установки лежит в `%LOCALAPPDATA%\Programs\MaxOnDroid` (или в выбранной папке). Форматы файлов описаны в [docs/formats.md](docs/formats.md), изменения по версиям — в [CHANGELOG.md](CHANGELOG.md), сторонние компоненты и их лицензии — в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## План
 
 1. Каркас, подключение, «Обзор».
 2. «Приложения» и «Чистка» (база пакетов UAD-ng, пресеты, откат).
 3. «Пульт» и «Экран» (scrcpy).
-4. «Файлы» и «Консоль». **← сейчас**
-5. Установщик, сборка в GitHub Actions, проверка безопасности, первый релиз.
+4. «Файлы» и «Консоль».
+5. Установщик, сборка в GitHub Actions, проверка безопасности, первый выпуск 0.9.0. **← готово**
 
 ## Лицензия
 
@@ -93,6 +123,10 @@ GPL-3.0-only, см. [LICENSE](LICENSE). В приложение встроен �
 
 MaxOnDroid is a Windows desktop app for managing the Android devices on your home network (Android TV and phones) through `adb`. Every action is logged as the plain `adb` command it runs.
 
-Stage 4 of 5 is done: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the Apps tab (install APKs and split bundles, per-app actions, save APKs), the Debloat tab (packages grouped by publisher with removal risk 1-4, presets, undo history), the Remote tab (on-screen TV remote and PC keyboard shortcuts), the Screen tab (scrcpy mirroring with presets, MP4 recording, screenshots), the Files tab (browse, upload and download with drag and drop, new folder, rename, delete), the Console tab (adb and shell modes with history and saved commands), the command journal, Russian and English, light and dark themes. Run it from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
+Release 0.9.0: all five stages are done. Features: device list with persistent numbered tokens, USB / address / pairing code / QR / mDNS connection, auto-reconnect, the Overview tab, the Apps tab (install APKs and split bundles, per-app actions, save APKs), the Debloat tab (packages grouped by publisher with removal risk 1-4, presets, undo history), the Remote tab (on-screen TV remote and PC keyboard shortcuts), the Screen tab (scrcpy mirroring with presets, MP4 recording, screenshots), the Files tab (browse, upload and download with drag and drop, new folder, rename, delete), the Console tab (adb and shell modes with history and saved commands), the command journal, Russian and English, light and dark themes.
+
+**Install:** download `MaxOnDroid-<version>-setup.exe` from the [latest release](https://github.com/mgrigorev183-arch/MaxOnDroid/releases/latest), check its SHA-256 against the one on the release page (`(Get-FileHash .\MaxOnDroid-0.9.0-setup.exe).Hash` in PowerShell or `certutil -hashfile MaxOnDroid-0.9.0-setup.exe SHA256`), then run it. The installer is not code-signed, so SmartScreen may warn: if the hash matches, choose "More info" → "Run anyway". It installs for the current user without administrator rights (default `%LOCALAPPDATA%\Programs\MaxOnDroid`) and refuses folders that need administrator rights. adb and scrcpy 5.0.1 are included. **Updates:** once a day the app asks GitHub for the latest release number and shows a link if it is newer; it never downloads anything itself (Settings to turn off, Help → Check for updates). **Uninstall:** Windows Settings → Apps → MaxOnDroid; you are asked whether to delete your settings, logs and APK backups too (kept by default). Screenshots in Pictures\MaxOnDroid are always kept. Security review: [docs/security-review.md](docs/security-review.md). Third-party licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Run from source: install Python 3.11+, have `adb` on `PATH` (or set its path in Settings), then `pip install -r requirements.txt` and `python -m maxondroid`. Tests: `pip install -r requirements-dev.txt`, `QT_QPA_PLATFORM=offscreen`, `python -m pytest`.
 
 Licensed under GPL-3.0-only.

@@ -214,6 +214,12 @@ Search sits on its own row under the path: a field with a search icon and a clea
 ### Console
 Mode radios ("adb", "shell") with the selected device on the right; the input line in the code face with brass "Run" and "Stop"; under it a code-face line "Will run: adb …" or, in the error colour, why it cannot run. The output is a read-only code-face pane without wrapping, each run headed by "> adb …"; a narrow column on the right holds saved commands (muted hint while empty, "Save…" on its own row, Run and Delete under it). A status line at the bottom: "Done · exit code 0 · 1.2 s" or "Stopped after …".
 
+### Update notice
+A neutral info banner above the device content, shown only when a newer release exists: title "Version 0.9.1 is out", body naming the installed version and that settings survive an update, actions "Open download page" and "Hide". Hide remembers that version, so the banner returns only for the next one. The Help menu's "Check for updates" answers in a plain message box (up to date, new version with an Open button, or could not check). Nothing downloads; the link is always this repository's release page.
+
+### Installer
+Inno Setup's modern wizard in Russian or English with the app icon: language, licence, folder (default in the user's profile; folders needing administrator rights are refused with a message that names a profile folder instead), an unchecked desktop-shortcut task, install, "Launch MaxOnDroid". The uninstaller asks once, defaulting to No, whether to delete settings, logs and APK backups, and says that screenshots stay.
+
 ## Do's and Don'ts
 
 - **Do** show the adb command behind every action in the journal, prefixed with the device token.
