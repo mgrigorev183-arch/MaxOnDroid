@@ -141,3 +141,41 @@ def test_parse_index_handles_junk_and_denied():
     assert [(e.path, e.size) for e in found] == [("/sdcard/A", 4096), ("/sdcard/A/b|c.txt", 5), ("/sdcard/bad", 0)]
     with pytest.raises(FilesError):
         parse_index("@@denied\n", "/data")
+
+
+def test_an_index_of_root_does_not_answer_for_a_folder_it_could_not_enter():
+    """The report: search /sdcard (1161 photos), then /, then /sdcard again showed nothing."""
+    root_index = Index("/", (entry("/system/etc/a.png"), entry("/system", "dir")))
+    assert root_index.covers("/") and root_index.covers("/system")
+    assert not root_index.covers("/sdcard")  # nothing of /sdcard in it: ask the device
+    assert not root_index.covers("/system/etc/a.png/x")
+    with_storage = Index("/", (entry("/sdcard", "dir"), entry("/sdcard/DCIM/p.jpg")))
+    assert with_storage.covers("/sdcard") and with_storage.covers("/sdcard/DCIM")
+
+
+@needs_sh
+def test_index_from_the_top_enters_the_sdcard_link_and_skips_kernel_trees(tmp_path):
+    top = tmp_path / "top"
+    (top / "storage" / "emulated" / "0" / "DCIM").mkdir(parents=True)
+    (top / "storage" / "emulated" / "0" / "DCIM" / "p.jpg").write_text("p")
+    (top / "system" / "etc").mkdir(parents=True)
+    (top / "system" / "etc" / "a.png").write_text("a")
+    (top / "proc" / "1").mkdir(parents=True)
+    (top / "proc" / "1" / "status").write_text("s")
+    (top / "sdcard").symlink_to(top / "storage" / "emulated" / "0")
+    device = LocalShell(tmp_path)
+    index, _ = build_index(device, SERIAL, str(top), follow=search.FOLLOW_FROM_ROOT)
+    paths = {e.path for e in index.entries}
+    assert str(top / "sdcard" / "DCIM" / "p.jpg") in paths  # entered through the link
+    assert str(top / "system" / "etc" / "a.png") in paths
+    assert not any("/proc" in p for p in paths)  # skipped
+    plain, _ = build_index(device, SERIAL, str(top), follow=())
+    assert str(top / "sdcard" / "DCIM" / "p.jpg") not in {e.path for e in plain.entries}  # control: find alone does not
+
+
+def test_the_link_to_user_storage_is_followed_only_from_the_top(fake_adb):
+    fake_adb.set_rules([{"args": ["-s", SERIAL, "shell", "*"], "stdout": "@@end\n"}])
+    build_index(fake_adb.runner, SERIAL, "/")
+    build_index(fake_adb.runner, SERIAL, "/sdcard")
+    top, sd = [c[3] for c in fake_adb.calls()]
+    assert top.endswith(" / sdcard/") and sd.endswith(" /sdcard")

@@ -46,6 +46,7 @@ ENTRY_ROLE = Qt.ItemDataRole.UserRole + 1
 SORT_ROLE = Qt.ItemDataRole.UserRole + 2
 LISTED_IN_CONFIRM = 10
 SEARCH_DELAY_MS = 250  # filter after the user pauses typing
+MAX_INDEXES = 4  # file lists kept per device (each folder searched recently)
 
 
 def human_size(size: int) -> str:
@@ -114,8 +115,9 @@ class FilesTab(QWidget):
         self._transfer: threading.Event | None = None  # the running copy's cancel switch
         self.last_download: Path | None = None
         # search: the device's list of everything below a folder, filtered here as you type
-        self.index: search.Index | None = None
-        self._index_key: str | None = None  # device the index belongs to
+        self.index: search.Index | None = None  # the one the current results come from
+        self.indexes: list[search.Index] = []  # recent ones for this device, so going back does not ask again
+        self._index_key: str | None = None  # device the indexes belong to
         self._indexing: threading.Event | None = None
         self.searching = False
         self.search_root = files.HOME
@@ -460,7 +462,7 @@ class FilesTab(QWidget):
         self.ctx.tasks.submit(work, done, failed)
 
     def reload_after(self, result) -> None:
-        self.index = None  # the folder changed: a later search asks the device again
+        self._forget_indexes()  # the folder changed: a later search asks the device again
         if self.searching:  # copied in while searching: ask the device again for the results
             self._listing_stale = True
             self._build_index()
@@ -494,8 +496,8 @@ class FilesTab(QWidget):
         if self.searching:
             def after(path: str) -> None:
                 self._listing_stale = True
-                if self.index is not None:
-                    self.index = self.index.renamed(entry.path, path)
+                self.indexes = [i.renamed(entry.path, path) for i in self.indexes]
+                self.index = self._covering(self.search_root)
                 self._show_results(select=path)
         self._run(lambda: files.rename(runner, serial, entry.path, name), lambda path: tr("files.renamed", path=path), after)
 
@@ -526,8 +528,8 @@ class FilesTab(QWidget):
         if self.searching:
             def after(_result) -> None:
                 self._listing_stale = True
-                if self.index is not None:
-                    self.index = self.index.without(paths)
+                self.indexes = [i.without(paths) for i in self.indexes]
+                self.index = self._covering(self.search_root)
                 self._show_results()
         self._run(lambda: files.remove(runner, serial, paths), lambda _r: tr("files.deleted", count=len(paths)), after)
 
@@ -651,7 +653,9 @@ class FilesTab(QWidget):
             self.search_root = self.folder
             self.views.setCurrentIndex(1)
             self._update_buttons()
-        if self.index is not None and self._index_key == self.view.key and self.index.covers(self.search_root):
+        chosen = self._covering(self.search_root) if self._index_key == self.view.key else None
+        if chosen is not None:
+            self.index = chosen
             self._show_results()
         else:
             self._build_index()
@@ -676,6 +680,9 @@ class FilesTab(QWidget):
                 return
             if self.view is None or self.view.key != key:
                 return  # the device changed meanwhile
+            if self._index_key != key:
+                self.indexes = []
+            self.indexes = [i for i in self.indexes if i.root != index.root][-(MAX_INDEXES - 1):] + [index]
             self.index, self._index_key = index, key
             self._say("")
             if self.searching:
@@ -757,18 +764,26 @@ class FilesTab(QWidget):
         self._search_timer.stop()
         self._leave_search()
 
+    def _covering(self, folder: str) -> search.Index | None:
+        """The most specific remembered index that can answer a search in ``folder``."""
+        usable = [i for i in self.indexes if i.covers(folder)]
+        return max(usable, key=lambda i: len(i.root)) if usable else None
+
+    def _forget_indexes(self) -> None:
+        self.indexes = []
+        self.index = None
+
     def _drop_index(self) -> None:
         if self._indexing is not None:
             self._indexing.set()
-        self.index = None
+        self._forget_indexes()
         self._index_key = None
 
     def _refresh_clicked(self) -> None:
+        self._forget_indexes()
         if self.searching:
-            self.index = None
             self._build_index()
         else:
-            self.index = None
             self.reload()
 
     def _result_activated(self, index: QModelIndex) -> None:

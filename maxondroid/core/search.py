@@ -21,17 +21,23 @@ INDEX_TIMEOUT = 600.0
 MAX_SHOWN = 2000  # rows in the results table; the rest are counted, not shown (keeps typing smooth)
 
 # Everything below "$1": type|size|modified|./relative/path, one stat call per batch of files.
+# Further arguments are extra start points relative to "$1", written with a trailing slash so a
+# link to a folder is entered: from "/" that is "sdcard/", because find does not follow links and
+# the real /storage/emulated/0 cannot be read without root, so the user's files would be missing.
+# Kernel and device trees (/proc, /sys, ...) are skipped: huge, slow, and never what anyone looks for.
 # Unreadable subfolders are skipped by find (errors to /dev/null). Without stat (old Android)
 # names come from find alone, folders and files from two passes.
+_PRUNE = "\\( -path ./proc -o -path ./sys -o -path ./dev -o -path ./acct -o -path ./d -o -path ./config \\) -prune -o"
 INDEX_SCRIPT = (
-    'cd "$1" 2>/dev/null && [ -r . ] || { echo "@@denied"; exit 0; }; '
+    'cd "$1" 2>/dev/null && [ -r . ] || { echo "@@denied"; exit 0; }; shift; '
     "if command -v stat >/dev/null 2>&1; then "
-    "find . -mindepth 1 \\( -type d -o -type f \\) -exec stat -c '%F|%s|%Y|%n' {} + 2>/dev/null; "
+    f"find . \"$@\" -mindepth 1 {_PRUNE} \\( -type d -o -type f \\) -exec stat -c '%F|%s|%Y|%n' {{}} + 2>/dev/null; "
     "else "
-    'find . -mindepth 1 -type d 2>/dev/null | while read -r f; do echo "directory|0|0|$f"; done; '
-    'find . -mindepth 1 -type f 2>/dev/null | while read -r f; do echo "regular file|0|0|$f"; done; '
+    f'find . "$@" -mindepth 1 {_PRUNE} -type d -print 2>/dev/null | while read -r f; do echo "directory|0|0|$f"; done; '
+    f'find . "$@" -mindepth 1 {_PRUNE} -type f -print 2>/dev/null | while read -r f; do echo "regular file|0|0|$f"; done; '
     "fi; echo @@end"
 )
+FOLLOW_FROM_ROOT = ("sdcard/",)
 
 # Type groups offered in the Files tab; "folders" and "custom" are handled apart.
 TYPES: dict[str, tuple[str, ...]] = {
@@ -51,9 +57,19 @@ class Index:
     entries: tuple[RemoteEntry, ...]
 
     def covers(self, folder: str) -> bool:
-        """True if a search in ``folder`` can use this index (it is the root or below it)."""
+        """True if a search in ``folder`` can use this index.
+
+        Being below the root by name is not enough: an index of "/" holds no
+        files under /sdcard when the device would not let find in (/sdcard is
+        a link, its target unreadable without root). So the folder must be the
+        root or have entries of its own in the index; an empty or closed folder
+        is asked for again, which is quick.
+        """
         folder = normalize(folder)
-        return folder == self.root or folder.startswith(self.root.rstrip("/") + "/")
+        if folder == self.root:
+            return True
+        prefix = folder.rstrip("/") + "/"
+        return folder.startswith(self.root.rstrip("/") + "/") and any(e.path.startswith(prefix) for e in self.entries)
 
     def below(self, folder: str) -> list[RemoteEntry]:
         folder = normalize(folder)
@@ -102,10 +118,17 @@ def parse_index(text: str, root: str) -> list[RemoteEntry]:
     return entries
 
 
-def build_index(runner: AdbRunner, serial: str, root: str, cancel: threading.Event | None = None) -> tuple[Index | None, AdbResult]:
-    """Ask the device for everything below ``root``. ``None`` if cancelled."""
+def build_index(
+    runner: AdbRunner, serial: str, root: str, cancel: threading.Event | None = None, follow: tuple[str, ...] | None = None
+) -> tuple[Index | None, AdbResult]:
+    """Ask the device for everything below ``root``. ``None`` if cancelled.
+
+    ``follow``: links to folders below the root to enter too (default: /sdcard when searching "/").
+    """
     root = normalize(root)
-    command = " ".join(sh_quote(a) for a in ["sh", "-c", INDEX_SCRIPT, "sh", root])
+    if follow is None:
+        follow = FOLLOW_FROM_ROOT if root == "/" else ()
+    command = " ".join(sh_quote(a) for a in ["sh", "-c", INDEX_SCRIPT, "sh", root, *follow])
     result = runner.run(["shell", command], serial=serial, timeout=INDEX_TIMEOUT, cancel=cancel)
     if result.cancelled:
         return None, result

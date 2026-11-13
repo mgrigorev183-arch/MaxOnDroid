@@ -32,7 +32,8 @@ INDEX = (
 
 
 def index_rule(root, output=INDEX, **extra):
-    command = " ".join(sh_quote(a) for a in ["sh", "-c", search.INDEX_SCRIPT, "sh", root])
+    follow = search.FOLLOW_FROM_ROOT if root == "/" else ()
+    command = " ".join(sh_quote(a) for a in ["sh", "-c", search.INDEX_SCRIPT, "sh", root, *follow])
     return {"args": ["-s", PHONE, "shell", command], "stdout": output, **extra}
 
 
@@ -49,7 +50,7 @@ def win(qtbot, fake_adb):
 
 
 def index_calls(fake_adb):
-    return [c for c in fake_adb.calls() if c[:3] == ["-s", PHONE, "shell"] and "find . -mindepth 1" in c[3]]
+    return [c for c in fake_adb.calls() if c[:3] == ["-s", PHONE, "shell"] and 'find . "$@"' in c[3]]
 
 
 def result_names(win):
@@ -228,3 +229,28 @@ def test_screenshots(win, qtbot):
         qtbot.wait(150)
         win.grab().save(str(Path(folder) / f"search-{theme}.png"))
     QApplication.processEvents()
+
+
+def test_going_to_the_top_and_back_keeps_the_right_results(qtbot, fake_adb):
+    """The report: photos in /sdcard (1161), then / (12), then /sdcard again showed nothing."""
+    top_listing = "directory|4096|1|sdcard\ndirectory|4096|1|system\n@@end\n"
+    top_index = "directory|4096|1|./system\nregular file|1300|1|./system/etc/default_screenshot.png\n@@end\n"
+    w = make_window(qtbot, fake_adb, [*RULES, listing("/", top_listing), index_rule("/", top_index)])
+    try:
+        tab = w.files
+        qtbot.waitUntil(lambda: bool(tab.entries), timeout=10000)
+        photos = tab.type_combo.findData("photos")
+        tab.type_combo.setCurrentIndex(photos)
+        qtbot.waitUntil(lambda: set(result_names(w)) == {"IMG_1.JPG", "Море.jpeg"}, timeout=8000)
+        tab.open_folder_path("/")  # ends the search
+        qtbot.waitUntil(lambda: tab.folder == "/" and not tab._loading, timeout=5000)
+        tab.type_combo.setCurrentIndex(photos)
+        qtbot.waitUntil(lambda: result_names(w) == ["default_screenshot.png"], timeout=8000)
+        tab.open_folder_path("/sdcard")
+        qtbot.waitUntil(lambda: tab.folder == "/sdcard" and not tab._loading, timeout=5000)
+        tab.type_combo.setCurrentIndex(photos)
+        qtbot.waitUntil(lambda: set(result_names(w)) == {"IMG_1.JPG", "Море.jpeg"}, timeout=8000)
+        assert len(index_calls(fake_adb)) == 2  # /sdcard came back from memory, / was asked once
+    finally:
+        w.timer.stop()
+        w.ctx.tasks.shutdown()
