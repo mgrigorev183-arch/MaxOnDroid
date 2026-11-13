@@ -128,26 +128,46 @@ def select(tab, name):
     raise AssertionError(name)
 
 
+def wait_or_explain(qtbot, win, fake_adb, condition, timeout=15000):
+    """waitUntil that says what the app was doing when it times out (slow Windows runners)."""
+    try:
+        qtbot.waitUntil(condition, timeout=timeout)
+    except Exception as exc:
+        tab = win.apps
+        state = {
+            "banner": tab.banner.body.text(),
+            "busy": tab._busy,
+            "view": None if tab.view is None else tab.view.key,
+            "tasks_alive": len(win.ctx.tasks._alive),
+            "threads_active": win.ctx.tasks.pool.activeThreadCount(),
+            "loading": sorted(win.ctx.packages.loading),
+            "last_adb_calls": fake_adb.calls()[-12:],
+        }
+        raise AssertionError(f"timed out; app state: {state}") from exc
+
+
 def test_apps_actions(win, qtbot, fake_adb, accept_all):
     seen, _ = accept_all
     win.tabs.setCurrentWidget(win.apps)
     tab = win.apps
-    qtbot.waitUntil(lambda: tab.stack.currentIndex() == 1, timeout=15000)
+    wait_or_explain(qtbot, win, fake_adb, lambda: tab.stack.currentIndex() == 1)
     select(tab, "org.videolan.vlc")
     assert tab.launch_button.isEnabled()
     tab.launch_button.click()
-    qtbot.waitUntil(lambda: "запущено" in tab.banner.body.text(), timeout=15000)
+    wait_or_explain(qtbot, win, fake_adb, lambda: "запущено" in tab.banner.body.text())
+    # the launch reloads the package list; act on the fresh list, as a person would after it redraws
+    wait_or_explain(qtbot, win, fake_adb, lambda: TV_KEY not in win.ctx.packages.loading and not win.ctx.tasks.busy())
     select(tab, "com.google.android.youtube.tv")
     assert tab.toggle_button.text() == "Отключить"
     tab.toggle_button.click()
-    qtbot.waitUntil(lambda: "pm disable-user --user 0 com.google.android.youtube.tv" in shell_calls(fake_adb), timeout=15000)
-    qtbot.waitUntil(lambda: tab.banner.body.text().startswith("Готово"), timeout=15000)
+    wait_or_explain(qtbot, win, fake_adb, lambda: "pm disable-user --user 0 com.google.android.youtube.tv" in shell_calls(fake_adb))
+    wait_or_explain(qtbot, win, fake_adb, lambda: tab.banner.body.text().startswith("Готово"))
     assert win.ctx.changes.pending(TV_KEY)[0].action == "disable"
     tab.state.setCurrentIndex(tab.state.findData("removed"))
     select(tab, "com.google.android.tvrecommendations")
     assert tab.remove_button.text() == "Вернуть"
     tab.remove_button.click()
-    qtbot.waitUntil(lambda: "cmd package install-existing --user 0 com.google.android.tvrecommendations" in shell_calls(fake_adb), timeout=15000)
+    wait_or_explain(qtbot, win, fake_adb, lambda: "cmd package install-existing --user 0 com.google.android.tvrecommendations" in shell_calls(fake_adb))
 
 
 def test_drag_and_drop_installs(win, qtbot, fake_adb, tmp_path):

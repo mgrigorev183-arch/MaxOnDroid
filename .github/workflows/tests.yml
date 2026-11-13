@@ -10,6 +10,10 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"] # 3.11 is what the owner and the release build use
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -18,7 +22,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Install
         run: python -m pip install -r requirements-dev.txt
       - name: Lint
@@ -33,6 +37,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: windows-screenshots
+          name: windows-screenshots-py${{ matrix.python }}
           path: screenshots/
           retention-days: 14
