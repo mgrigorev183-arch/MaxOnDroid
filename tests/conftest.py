@@ -1,12 +1,26 @@
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
+from pytestqt.qtbot import QtBot
 
 from maxondroid.core.adb import AdbRunner
 
 FAKE_ADB = Path(__file__).with_name("fake_adb.py")
+
+# Shared CI runners can be several times slower than a desktop: every fake adb call starts a Python
+# process. MAXONDROID_TEST_TIME_SCALE stretches the waitUntil limits there. A wait still ends as soon
+# as its condition holds, so passing tests take no longer; only a real hang takes longer to report.
+TIME_SCALE = max(1.0, float(os.environ.get("MAXONDROID_TEST_TIME_SCALE") or 1))
+if TIME_SCALE > 1:
+    _wait_until = QtBot.waitUntil
+
+    def _scaled_wait_until(self, callback, *, timeout=5000):
+        return _wait_until(self, callback, timeout=int(timeout * TIME_SCALE))
+
+    QtBot.waitUntil = _scaled_wait_until
 
 
 class FakeAdb:

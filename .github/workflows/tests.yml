@@ -16,6 +16,7 @@ jobs:
         python: ["3.11", "3.12"] # 3.11 is what the owner and the release build use
     env:
       QT_QPA_PLATFORM: offscreen
+      MAXONDROID_TEST_TIME_SCALE: "3" # shared runners are slow; see tests/conftest.py
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
