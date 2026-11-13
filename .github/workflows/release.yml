@@ -4,6 +4,8 @@ name: release
 # current user, runs the installed app's self-test, uninstalls it and publishes the
 # installer with its SHA-256. Pushes that touch the packaging run the same build and
 # checks without publishing, so a broken installer shows up before the tag.
+# Without git: Actions -> release -> Run workflow on main with "Publish" ticked builds
+# the same way and creates the tag v<__version__> together with the release.
 
 on:
   push:
@@ -14,6 +16,11 @@ on:
       - ".github/workflows/release.yml"
       - "maxondroid/selftest.py"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish: create the tag v<version> on this commit and the release"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -225,7 +232,7 @@ jobs:
           retention-days: 14
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -241,13 +248,24 @@ jobs:
       - name: Check the hash file again
         working-directory: out
         run: sha256sum --check --strict MaxOnDroid-*-setup.exe.sha256
+      - name: Tag and version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^__version__ = "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' maxondroid/__init__.py)"
+          tag="v${version}"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then echo "tag $GITHUB_REF_NAME != $tag"; exit 1; fi
+          if [ "$GITHUB_REF_TYPE" != tag ] && gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $tag already exists; raise __version__ first"; exit 1
+          fi
+          test -f "out/MaxOnDroid-${version}-setup.exe"
+          { echo "VERSION=${version}"; echo "TAG=${tag}"; } >> "$GITHUB_ENV"
       - name: Release notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          setup="MaxOnDroid-${version}-setup.exe"
+          setup="MaxOnDroid-${VERSION}-setup.exe"
           digest="$(cut -d' ' -f1 "out/${setup}.sha256")"
           {
-            echo "## MaxOnDroid ${version}"
+            echo "## MaxOnDroid ${VERSION}"
             echo
             echo "Installer for Windows 10 and 11 (64-bit), for the current user, without administrator rights. Includes scrcpy ${SCRCPY_VERSION} with adb."
             echo "Установщик для Windows 10 и 11 (64-бит), для текущего пользователя, без прав администратора. Внутри scrcpy ${SCRCPY_VERSION} с adb."
@@ -263,13 +281,13 @@ jobs:
             echo "The installer is not code-signed, so Windows SmartScreen may warn: More info → Run anyway. See the README."
             echo "Установщик не подписан, поэтому SmartScreen может предупредить: «Подробнее» → «Выполнить в любом случае». Подробности в README."
             echo
-            awk -v v="## ${version}" 'index($0, v) == 1 {on=1; next} /^## / && on {exit} on' CHANGELOG.md
+            awk -v v="## ${VERSION}" 'index($0, v) == 1 {on=1; next} /^## / && on {exit} on' CHANGELOG.md
           } > notes.md
           cat notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" "out/MaxOnDroid-${version}-setup.exe" "out/MaxOnDroid-${version}-setup.exe.sha256" \
-            --repo "$GITHUB_REPOSITORY" --title "MaxOnDroid ${version}" --notes-file notes.md --verify-tag
+          if [ "$GITHUB_REF_TYPE" = tag ]; then where="--verify-tag"; else where="--target=${GITHUB_SHA}"; fi
+          gh release create "$TAG" "out/MaxOnDroid-${VERSION}-setup.exe" "out/MaxOnDroid-${VERSION}-setup.exe.sha256" \
+            --repo "$GITHUB_REPOSITORY" --title "MaxOnDroid ${VERSION}" --notes-file notes.md "$where"
