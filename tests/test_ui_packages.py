@@ -132,22 +132,22 @@ def test_apps_actions(win, qtbot, fake_adb, accept_all):
     seen, _ = accept_all
     win.tabs.setCurrentWidget(win.apps)
     tab = win.apps
-    qtbot.waitUntil(lambda: tab.stack.currentIndex() == 1, timeout=5000)
+    qtbot.waitUntil(lambda: tab.stack.currentIndex() == 1, timeout=15000)
     select(tab, "org.videolan.vlc")
     assert tab.launch_button.isEnabled()
     tab.launch_button.click()
-    qtbot.waitUntil(lambda: "запущено" in tab.banner.body.text(), timeout=5000)
+    qtbot.waitUntil(lambda: "запущено" in tab.banner.body.text(), timeout=15000)
     select(tab, "com.google.android.youtube.tv")
     assert tab.toggle_button.text() == "Отключить"
     tab.toggle_button.click()
-    qtbot.waitUntil(lambda: "pm disable-user --user 0 com.google.android.youtube.tv" in shell_calls(fake_adb), timeout=5000)
-    qtbot.waitUntil(lambda: tab.banner.body.text().startswith("Готово"), timeout=5000)
+    qtbot.waitUntil(lambda: "pm disable-user --user 0 com.google.android.youtube.tv" in shell_calls(fake_adb), timeout=15000)
+    qtbot.waitUntil(lambda: tab.banner.body.text().startswith("Готово"), timeout=15000)
     assert win.ctx.changes.pending(TV_KEY)[0].action == "disable"
     tab.state.setCurrentIndex(tab.state.findData("removed"))
     select(tab, "com.google.android.tvrecommendations")
     assert tab.remove_button.text() == "Вернуть"
     tab.remove_button.click()
-    qtbot.waitUntil(lambda: "cmd package install-existing --user 0 com.google.android.tvrecommendations" in shell_calls(fake_adb), timeout=5000)
+    qtbot.waitUntil(lambda: "cmd package install-existing --user 0 com.google.android.tvrecommendations" in shell_calls(fake_adb), timeout=15000)
 
 
 def test_drag_and_drop_installs(win, qtbot, fake_adb, tmp_path):

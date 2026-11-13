@@ -72,5 +72,5 @@ class StallWatchdog(QObject):
                 seconds = beat - stuck_since
                 stuck_since = None
                 if seconds <= IGNORE_LONGER:
-                    self.stalls.append((seconds, stack))
                     self.diag.stall(seconds, stack)
+                    self.stalls.append((seconds, stack))  # after the write: "stalls" lists what is already in the file
