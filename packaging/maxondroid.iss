@@ -1,4 +1,5 @@
-; Inno Setup script for MaxOnDroid: a per-user installer in Russian and English.
+﻿; Inno Setup script for MaxOnDroid: a per-user installer in Russian and English.
+; Saved as UTF-8 with a byte order mark: without it Inno Setup reads the Russian text as ANSI.
 ;   ISCC.exe /DAppVersion=0.9.0 /DSourceDir=..\dist\MaxOnDroid packaging\maxondroid.iss
 ; SourceDir is the PyInstaller folder with tools\scrcpy already copied in (see release.yml).
 ;
