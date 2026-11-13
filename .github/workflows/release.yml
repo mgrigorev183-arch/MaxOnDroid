@@ -55,6 +55,7 @@ jobs:
   build:
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,6 +111,7 @@ jobs:
           print(sorted(p.name for p in target.iterdir()))
 
       - name: Self-test of the built folder
+        timeout-minutes: 10
         shell: python
         run: |
           import json, os, pathlib, subprocess, sys
@@ -121,6 +123,7 @@ jobs:
               sys.exit(f"self-test failed (exit {rc})")
 
       - name: Install Inno Setup (pinned by hash and signature)
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $installer = Join-Path $env:RUNNER_TEMP "innosetup.exe"
@@ -144,6 +147,7 @@ jobs:
           Get-ChildItem dist\installer
 
       - name: A folder that needs administrator rights is refused
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $setup = "dist\installer\MaxOnDroid-$env:VERSION-setup.exe"
@@ -156,6 +160,7 @@ jobs:
           if (-not (Select-String -Path $log -Pattern "administrator rights" -Quiet)) { throw "the log does not explain the refusal" }
 
       - name: Silent per-user install
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $setup = "dist\installer\MaxOnDroid-$env:VERSION-setup.exe"
@@ -173,6 +178,7 @@ jobs:
           "INSTALL_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Self-test of the installed app
+        timeout-minutes: 10
         shell: python
         run: |
           import json, os, pathlib, subprocess, sys
@@ -187,6 +193,7 @@ jobs:
               sys.exit(f"self-test ran {data['executable']}, not the installed copy")
 
       - name: Silent uninstall removes the program
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $dir = $env:INSTALL_DIR

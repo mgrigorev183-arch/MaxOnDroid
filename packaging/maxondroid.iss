@@ -162,7 +162,8 @@ begin
     Problem := FolderProblem(WizardDirValue);
     if Problem <> '' then
     begin
-      MsgBox(Problem, mbError, MB_OK);
+      { SuppressibleMsgBox: a silent install with /SUPPRESSMSGBOXES must not wait for an invisible OK }
+      SuppressibleMsgBox(Problem, mbError, MB_OK, IDOK);
       Result := False;
     end;
   end;
@@ -202,7 +203,7 @@ begin
     Settings := ExpandConstant('{userappdata}\{#AppName}');
     Local := ExpandConstant('{localappdata}\{#AppName}');
     if (DirExists(Settings) or DirExists(Local)) and
-       (MsgBox(FmtMessage(CustomMessage('RemoveData'), [Settings, Local]), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
+       (SuppressibleMsgBox(FmtMessage(CustomMessage('RemoveData'), [Settings, Local]), mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES) then
     begin
       DelTree(Settings, True, True, True);
       DelTree(Local, True, True, True);

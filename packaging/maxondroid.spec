@@ -23,7 +23,7 @@ QT_EXCLUDES = [
     "PySide6.QtConcurrent", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
     "PySide6.QtPdf", "PySide6.QtMultimedia", "PySide6.Qt3DCore", "PySide6.QtCharts",
 ]
-EXCLUDES = QT_EXCLUDES + ["tkinter", "unittest", "pydoc", "pytest", "PIL"]
+EXCLUDES = QT_EXCLUDES + ["tkinter", "unittest", "pydoc", "pytest", "PIL", "setuptools", "pkg_resources", "distutils"]
 
 
 def version_info():
