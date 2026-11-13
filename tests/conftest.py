@@ -43,6 +43,17 @@ def isolated_home(tmp_path, monkeypatch):
     return home
 
 
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Tests never reach the internet: the daily update check and the UAD download would otherwise try."""
+    from maxondroid.core import net
+
+    def refuse(request, timeout):
+        raise net.NetError("network", "tests do not use the network")
+
+    monkeypatch.setattr(net, "_default_open", refuse)
+
+
 @pytest.fixture
 def fake_adb(tmp_path, monkeypatch):
     folder = tmp_path / "fakeadb"

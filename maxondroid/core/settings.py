@@ -42,6 +42,9 @@ class Settings:
     screen_devices: dict = field(default_factory=dict)
     capture_dir: str = ""  # empty: Pictures\MaxOnDroid
     console_mode: str = "adb"  # adb | shell
+    update_check: bool = True  # once a day, one request to GitHub's API; only a link is shown
+    update_last_check: str = ""  # ISO date of the last automatic check
+    update_dismissed: str = ""  # version whose banner the user hid
     files_download_dir: str = ""  # last folder the Files tab copied into; empty: Downloads
     capture_format: str = "mp4"  # mp4 opens anywhere; mkv survives scrcpy being killed
 

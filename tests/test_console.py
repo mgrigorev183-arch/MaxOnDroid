@@ -140,3 +140,12 @@ def test_preview_shows_operators_as_typed():
     assert '"|"' not in command.display()
     assert build("adb", 'shell echo "a b" ; echo c&d', S).display() == f'adb -s {S} shell echo "a b" ; echo c&d'
     assert build("shell", "ls -l /sdcard/ | grep D", S).display() == f'adb -s {S} shell "ls -l /sdcard/ | grep D"'
+
+
+def test_pairing_code_is_not_kept_in_the_history(tmp_path):
+    store = ConsoleStore.load(tmp_path / "console.json")
+    command = build("adb", "pair 192.168.1.23:37159 482913", S)
+    store.remember("adb", command.text, command.secrets)
+    store.save()
+    assert "482913" not in (tmp_path / "console.json").read_text(encoding="utf-8")
+    assert store.history[-1] == ("adb", "pair 192.168.1.23:37159 ••••••")

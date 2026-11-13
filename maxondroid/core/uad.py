@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import ssl
-import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
+from maxondroid.core import net
 from maxondroid.core.jsonstore import read_json, write_json_atomic
 
 UAD_URL = (
@@ -146,17 +145,10 @@ def load(bundled_dir: Path, downloaded_dir: Path) -> Database:
 
 def download(downloaded_dir: Path, url: str = UAD_URL, timeout: float = 30.0, opener=None) -> Database:
     """Fetch the current list over HTTPS, check it, and keep it next to its checksum."""
-    if not url.startswith("https://"):
-        raise DatabaseError("insecure_url", url)
-    request = urllib.request.Request(url, headers={"User-Agent": "MaxOnDroid"})
-    open_url = opener or (lambda req, t: urllib.request.urlopen(req, timeout=t, context=ssl.create_default_context()))
     try:
-        with open_url(request, timeout) as response:
-            raw = response.read(MAX_DOWNLOAD_BYTES + 1)
-    except OSError as exc:  # URLError, HTTPError and socket errors are all OSError
-        raise DatabaseError("network", str(exc)) from exc
-    if len(raw) > MAX_DOWNLOAD_BYTES:
-        raise DatabaseError("too_large")
+        raw = net.fetch(url, MAX_DOWNLOAD_BYTES, timeout=timeout, opener=opener)
+    except net.NetError as exc:
+        raise DatabaseError(exc.code, exc.details) from exc
     entries = parse(raw)
     downloaded_dir.mkdir(parents=True, exist_ok=True)
     target = downloaded_dir / "uad_lists.json"

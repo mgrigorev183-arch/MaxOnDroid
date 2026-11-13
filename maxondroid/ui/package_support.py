@@ -77,6 +77,7 @@ def confirm(parent: QWidget, title: str, text: str, ok_text: str, danger: bool =
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
     box.setWindowTitle(title)
+    box.setTextFormat(Qt.TextFormat.PlainText)  # lists names that come from the device
     box.setText(text)
     box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     ok = box.addButton(ok_text, QMessageBox.ButtonRole.AcceptRole)

@@ -33,6 +33,10 @@ def refilter(proxy) -> None:
 
 def label(text: str = "", role: str | None = None, wrap: bool = False, selectable: bool = False) -> QLabel:
     lbl = QLabel(text)
+    # Plain text always: labels show device names, file names and adb output, which the device
+    # controls. Qt would render text that starts like HTML as rich text (security review, finding 2).
+    # The one label with our own links (connect dialog) switches to rich text explicitly.
+    lbl.setTextFormat(Qt.TextFormat.PlainText)
     if role:
         lbl.setProperty("role", role)
     lbl.setWordWrap(wrap)

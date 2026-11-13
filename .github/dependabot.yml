@@ -1,0 +1,16 @@
+# Weekly update proposals. Nothing is merged automatically: for
+# packaging/requirements-build.txt check the new wheel hashes before merging.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /packaging
+    schedule:
+      interval: weekly

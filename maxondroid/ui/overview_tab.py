@@ -497,6 +497,7 @@ class OverviewTab(QWidget):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning if danger else QMessageBox.Icon.Question)
         box.setWindowTitle(title)
+        box.setTextFormat(Qt.TextFormat.PlainText)
         box.setText(text)
         ok = box.addButton(ok_text, QMessageBox.ButtonRole.AcceptRole)
         box.addButton(tr("common.cancel"), QMessageBox.ButtonRole.RejectRole)

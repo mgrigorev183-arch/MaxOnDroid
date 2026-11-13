@@ -82,6 +82,12 @@ def create_window(app: QApplication) -> MainWindow:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv if argv is None else argv)
+    from maxondroid import selftest
+
+    self_test = selftest.parse_args(args[1:])
+    if self_test is not None:  # the release build checks itself; see maxondroid/selftest.py
+        return selftest.main(*self_test)
     if sys.platform == "win32":
         try:  # own taskbar icon instead of python.exe's
             import ctypes
@@ -89,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{APP_ID}.desktop")
         except Exception:
             pass
-    app = QApplication(argv if argv is not None else sys.argv)
+    app = QApplication(args)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)

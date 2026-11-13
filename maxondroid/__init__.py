@@ -6,4 +6,4 @@ Licensed under the GNU General Public License v3.0 only; see LICENSE.
 
 APP_NAME = "MaxOnDroid"
 APP_ID = "maxondroid"
-__version__ = "0.1.0"
+__version__ = "0.9.0"

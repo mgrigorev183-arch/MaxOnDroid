@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import date
 
 from PySide6.QtCore import QByteArray, QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from maxondroid import APP_NAME, __version__
-from maxondroid.core import paths
+from maxondroid.core import paths, update
 from maxondroid.core.adb import AdbNotFoundError, AdbRunner, find_adb
 from maxondroid.core.manager import DeviceManager, DeviceView, ManagerError
 from maxondroid.core.settings import THEMES
@@ -49,6 +50,7 @@ from maxondroid.ui.settings_dialog import SettingsDialog
 POLL_MS = 2500  # when adb track-devices is not running
 SLOW_POLL_MS = 10000  # track-devices reports changes at once; the poll only catches what it cannot see
 RECONNECT_EVERY_S = 20.0
+UPDATE_DELAY_MS = 4000  # the daily update check waits until the window has settled
 
 
 class _WatchBridge(QObject):
@@ -65,6 +67,8 @@ class MainWindow(QMainWindow):
         self._apply_theme = apply_theme
         self._apply_language = apply_language
         self.views: list[DeviceView] = []
+        self._release: update.Release | None = None
+        self._checking_update = False
         self._refreshing = False
         self._refresh_pending = False
         self._reconnecting = False
@@ -137,9 +141,12 @@ class MainWindow(QMainWindow):
         work_layout.setContentsMargins(0, 0, 0, 0)
         work_layout.setSpacing(0)
         self.adb_banner = Banner("error")
+        self.update_banner = Banner("info")
         banner_box = QVBoxLayout()
         banner_box.setContentsMargins(16, 12, 16, 0)
+        banner_box.setSpacing(8)
         banner_box.addWidget(self.adb_banner)
+        banner_box.addWidget(self.update_banner)
         work_layout.addLayout(banner_box)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -234,6 +241,8 @@ class MainWindow(QMainWindow):
         self.act_repo = QAction(self, triggered=lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
         self.act_about = QAction(self, triggered=self._about)
         self.act_logs = QAction(self, triggered=lambda: open_folder(paths.log_dir(), self))
+        self.act_update = QAction(self, triggered=lambda: self.check_updates(manual=True))
+        self.menu_help.addAction(self.act_update)
         self.menu_help.addAction(self.act_logs)
         self.menu_help.addAction(self.act_repo)
         self.menu_help.addAction(self.act_about)
@@ -256,6 +265,9 @@ class MainWindow(QMainWindow):
             action.setText(tr(f"settings.language.{code}"))
         self.act_repo.setText(tr("menu.repo"))
         self.act_logs.setText(tr("menu.logs"))
+        self.act_update.setText(tr("menu.update"))
+        if self._release is not None and self.update_banner.isVisible():
+            self._show_update_banner(self._release)
         self.act_about.setText(tr("menu.about"))
         self.tabs.setTabText(0, tr("tab.overview"))
         self.tabs.setTabText(1, tr("tab.apps"))
@@ -380,6 +392,7 @@ class MainWindow(QMainWindow):
         self._start_watcher()
         self.timer.start()
         self.refresh_now()
+        QTimer.singleShot(UPDATE_DELAY_MS, self.check_updates)
         self.device_list.setFocus()
 
     def _render_adb_banner(self) -> None:
@@ -392,6 +405,70 @@ class MainWindow(QMainWindow):
             self.adb_banner.hide()
 
     # -- polling --------------------------------------------------------------
+    # -- updates ---------------------------------------------------------------------
+    def check_updates(self, manual: bool = False) -> None:
+        """Ask GitHub for the latest release: daily when allowed, or now from the Help menu."""
+        s = self.ctx.settings.settings
+        if self._checking_update or (not manual and not update.due(s.update_check, s.update_last_check)):
+            return
+        self._checking_update = True
+        if not manual:
+            s.update_last_check = date.today().isoformat()
+            self._save_settings()
+
+        def done(release: update.Release) -> None:
+            self._checking_update = False
+            self._release = release
+            if update.should_announce(release, dismissed="" if manual else s.update_dismissed):
+                self._show_update_banner(release)
+            if manual:
+                if release.newer_than(__version__):
+                    self._update_message(tr("update.new.title"), tr("update.new.body", version=release.version, current=__version__), release.url)
+                else:
+                    self._update_message(tr("update.none.title"), tr("update.none.body", current=__version__))
+
+        def failed(exc: BaseException) -> None:
+            self._checking_update = False
+            if manual:
+                details = exc.details if isinstance(exc, update.UpdateError) else str(exc)
+                self._update_message(tr("update.failed.title"), tr("update.failed.body", details=details or "—"))
+
+        self.ctx.tasks.submit(update.latest, done, failed)
+
+    def _show_update_banner(self, release: update.Release) -> None:
+        def hide() -> None:
+            self.ctx.settings.settings.update_dismissed = release.version
+            self._save_settings()
+            self.update_banner.hide()
+
+        self.update_banner.show_message(
+            "info",
+            tr("update.banner.title", version=release.version),
+            tr("update.banner.body", current=__version__),
+            tr("update.open"),
+            lambda: QDesktopServices.openUrl(QUrl(release.url)),
+            self.ctx.palette,
+            tr("update.hide"),
+            hide,
+        )
+
+    def _update_message(self, title: str, body: str, url: str | None = None) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(body)
+        open_button = box.addButton(tr("update.open"), QMessageBox.ButtonRole.AcceptRole) if url else None
+        box.addButton(tr("common.close"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if url and box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _save_settings(self) -> None:
+        try:
+            self.ctx.settings.save()
+        except OSError:
+            pass
+
     def _start_watcher(self) -> None:
         if self.watcher is not None:
             self.watcher.stop()

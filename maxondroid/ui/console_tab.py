@@ -265,7 +265,7 @@ class ConsoleTab(QWidget):
         if runner is None:
             self.status.setText(tr("console.no_adb"))
             return
-        self.store.remember(self.mode, self.input.text())
+        self.store.remember(self.mode, self.input.text(), command.secrets)
         try:
             self.store.save()
         except OSError:

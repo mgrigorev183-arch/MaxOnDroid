@@ -33,6 +33,7 @@ FORMAT = "maxondroid.console"
 MAX_HISTORY = 200
 MAX_SAVED = 100
 MAX_TEXT = 4000
+MASK = "••••••"
 # adb commands that are about adb itself or the network, not about one device
 NO_SERIAL = frozenset({
     "devices", "version", "help", "start-server", "kill-server", "connect", "disconnect", "pair", "mdns", "keygen",
@@ -94,7 +95,7 @@ class Command:
         """
         shown = []
         for arg in self.args:
-            value = "••••••" if arg in self.secrets else arg
+            value = MASK if arg in self.secrets else arg
             plain = value and not any(c.isspace() or c in "\"'" for c in value)
             shown.append(value if plain else '"' + value.replace('"', '\\"') + '"')
         return " ".join(["adb", *shown])
@@ -271,8 +272,12 @@ class ConsoleStore:
             "saved": [{"name": s.name, "mode": s.mode, "text": s.text} for s in self.saved[:MAX_SAVED]],
         })
 
-    def remember(self, mode: str, text: str) -> None:
+    def remember(self, mode: str, text: str, secrets: tuple[str, ...] = ()) -> None:
+        """Add to the history. Pairing codes are masked: console.json is a plain file on disk."""
         text = text.strip()
+        for secret in secrets:
+            if secret:
+                text = text.replace(secret, MASK)
         if not text:
             return
         if self.history and self.history[-1] == (mode, text):

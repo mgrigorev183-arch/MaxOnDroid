@@ -80,8 +80,12 @@ class SettingsDialog(QDialog):
         self.auto_reconnect.setChecked(s.auto_reconnect)
         self.journal_visible = QCheckBox(tr("settings.journal_visible"))
         self.journal_visible.setChecked(s.journal_visible)
+        self.update_check = QCheckBox(tr("settings.update_check"))
+        self.update_check.setChecked(s.update_check)
+        self.update_check.setToolTip(tr("settings.update_check.tip"))
         form.addRow(label(""), self.auto_reconnect)
         form.addRow(label(""), self.journal_visible)
+        form.addRow(label(""), self.update_check)
         layout.addLayout(form)
 
         folder_row = QHBoxLayout()
@@ -138,4 +142,5 @@ class SettingsDialog(QDialog):
         s.scrcpy_path = self.scrcpy_path.text().strip()
         s.auto_reconnect = self.auto_reconnect.isChecked()
         s.journal_visible = self.journal_visible.isChecked()
+        s.update_check = self.update_check.isChecked()
         return s
